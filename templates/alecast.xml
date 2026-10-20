@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>AleCast</Name>
+  <Repository>ghcr.io/aleb-roni/alecast:latest</Repository>
+  <Registry>https://github.com/AleB-Roni/AleCast/pkgs/container/alecast</Registry>
+  <Network>bridge</Network>
+  <Privileged>true</Privileged>
+  <Support>https://github.com/AleB-Roni/AleCast/issues</Support>
+  <Project>https://github.com/AleB-Roni/AleCast</Project>
+  <Overview>Streamt den Bildschirm eines per USB angeschlossenen Android-Handys (scrcpy) als RTSP-Push an go2rtc/Frigate. Tippt den Weiterschauen-Dialog der Tapo-App automatisch weg.</Overview>
+  <Category>HomeAutomation: MediaServer:Video</Category>
+  <WebUI/>
+  <TemplateURL>https://raw.githubusercontent.com/AleB-Roni/AleCast/main/templates/alecast.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/Genymobile/scrcpy/master/app/data/icon.png</Icon>
+  <ExtraParams>--restart unless-stopped</ExtraParams>
+  <Config Name="USB-Geräte" Target="/dev/bus/usb" Default="/dev/bus/usb" Mode="rw" Description="USB-Bus des Hosts (für adb)" Type="Path" Display="advanced" Required="true" Mask="false">/dev/bus/usb</Config>
+  <Config Name="ADB-Schlüssel" Target="/root/.android" Default="/mnt/user/appdata/alecast/adbkeys" Mode="rw" Description="Speichert die USB-Debugging-Freigabe, damit das Handy nicht jedes Mal fragt" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/alecast/adbkeys</Config>
+  <Config Name="RTSP-Ziel" Target="RTSP_URL" Default="rtsp://192.168.1.10:8554/tapo_app" Mode="" Description="RTSP-Push-Ziel, z. B. go2rtc in Frigate: rtsp://FRIGATE-IP:8554/tapo_app" Type="Variable" Display="always" Required="true" Mask="false">rtsp://192.168.1.10:8554/tapo_app</Config>
+  <Config Name="Auto-Tap Text" Target="TAP_TEXT" Default="Weiter ansehen|Weiterschauen|Weiter schauen|Continue watching|Continue" Mode="" Description="Button-Text des Weiterschauen-Dialogs (Regex, mehrere mit |). Leer = Auto-Tap aus" Type="Variable" Display="always" Required="false" Mask="false">Weiter ansehen|Weiterschauen|Weiter schauen|Continue watching|Continue</Config>
+  <Config Name="Max. Auflösung" Target="MAX_SIZE" Default="1280" Mode="" Description="Längere Bildseite in Pixeln" Type="Variable" Display="advanced" Required="false" Mask="false">1280</Config>
+  <Config Name="Max. FPS Handy" Target="MAX_FPS" Default="15" Mode="" Description="Max. Bildrate vom Handy" Type="Variable" Display="advanced" Required="false" Mask="false">15</Config>
+  <Config Name="Bitrate" Target="VIDEO_BIT_RATE" Default="4000000" Mode="" Description="Video-Bitrate in bit/s" Type="Variable" Display="advanced" Required="false" Mask="false">4000000</Config>
+  <Config Name="Neu kodieren" Target="TRANSCODE" Default="1" Mode="" Description="1 = feste Bildrate (stabil für Frigate), 0 = durchreichen (weniger CPU)" Type="Variable" Display="advanced" Required="false" Mask="false">1</Config>
+  <Config Name="Ausgabe-FPS" Target="OUT_FPS" Default="10" Mode="" Description="Feste Ausgabe-Bildrate bei TRANSCODE=1" Type="Variable" Display="advanced" Required="false" Mask="false">10</Config>
+  <Config Name="Auto-Tap Intervall" Target="TAP_INTERVAL" Default="15" Mode="" Description="Sekunden zwischen Dialog-Prüfungen" Type="Variable" Display="advanced" Required="false" Mask="false">15</Config>
+  <Config Name="Display wach halten" Target="KEEP_AWAKE" Default="1" Mode="" Description="1 = Display bei USB-Verbindung anlassen" Type="Variable" Display="advanced" Required="false" Mask="false">1</Config>
+  <Config Name="ADB-Seriennummer" Target="ADB_SERIAL" Default="" Mode="" Description="Nur bei mehreren Handys nötig" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+</Container>
