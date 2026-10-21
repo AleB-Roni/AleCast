@@ -32,7 +32,7 @@ ENV SCRCPY_VERSION=${SCRCPY_VERSION} \
 EXPOSE 8080
 
 COPY entrypoint.sh /entrypoint.sh
-COPY webui.py recorder.py live.py history.html /opt/alecast/
+COPY webui.py recorder.py live.py app.html /opt/alecast/
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

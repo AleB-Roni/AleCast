@@ -253,9 +253,3 @@ def start_analysis_thread():
     threading.Thread(target=worker, daemon=True).start()
     threading.Thread(target=_backfill, daemon=True).start()
 
-_page_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "history.html")
-
-
-def rec_page():
-    with open(_page_path, encoding="utf-8") as f:
-        return f.read()

@@ -47,6 +47,14 @@ cameras:
         days: 7
 ```
 
+## Web-Oberfläche
+
+Eine Seite für PC und Handy mit drei Bereichen (am PC links, am Handy unten):
+
+- **Monitor** – Live-Bild und Verlauf in einem: großes Bild mit Uhrzeit, daneben/darunter der Zeitstrahl. Die Bedienleiste (±10 s/±1 min, Abspielen, Tempo, LIVE, Vollbild) erscheint erst beim Bewegen der Maus bzw. Antippen des Bilds. Tasten: Leertaste, ←/→, Umschalt+←/→, L (Live), F (Vollbild).
+- **Handy** – Bildschirm des Handys fernsteuern (tippen, wischen, gedrückt halten). Tasten, Tapo-Aktionen, Text und der RTSP-Ausschnitt liegen im eingeklappten Bereich **Bedienung**.
+- **Einstellungen** – RTSP-Streaming, Aufbewahrung, Status und Protokoll.
+
 ## 3. Auf Unraid installieren
 
 Das Image wird bei jedem Push automatisch per GitHub Actions gebaut und liegt unter `ghcr.io/aleb-roni/alecast:latest`.
