@@ -91,6 +91,10 @@ Port `8080` im Container auf einen freien Host-Port legen (Vorlage: `8086`), dan
 - Text ans Handy senden (nur ASCII, keine Umlaute – Einschränkung von `adb input text`)
 - Status: Akku, Temperatur, ob Tapo im Vordergrund ist, AleCast-Log
 
+### Live-Bild
+
+`/live.mjpg` liefert das Handybild live (MJPEG, ca. 8 Bilder/s, `LIVE_FPS`/`LIVE_MAX_SIZE` einstellbar), `/live.jpg` ein Einzelbild. Der Live-Strom läuft über einen eigenen scrcpy-Server und nur, solange jemand zuschaut (15 s nach dem letzten Zuschauer wird er beendet). Er funktioniert unabhängig davon, ob RTSP-Streaming an ist.
+
 ### Streaming & Aufbewahrung
 
 Karte **Streaming & Aufbewahrung** in der Web-UI:
@@ -170,7 +174,8 @@ Android-App im Ordner `android/`. Jede Änderung baut automatisch eine neue APK 
   - Video groß, daneben **Zeitstrahl** (neueste Zeit oben, zoombar), blaue Balken = Aufnahme, orange = **Bewegung im Bild**
   - Zeitstrahl antippen = zu dieser Uhrzeit springen, Maus darüber = **Vorschaubild**
   - Segmente laufen **nahtlos** hintereinander, Lücken werden übersprungen, 1×–16× Geschwindigkeit
-  - **● Jetzt** springt zur neuesten Aufnahme und läuft mit; Tage per ◀ ▶ wechseln; Uhrzeit direkt eingeben
+  - **● LIVE** (Startansicht): aktuelles Handybild direkt per USB, unabhängig von den Segmenten; Zeitstrahl antippen oder −10 s/−1 min wechselt in die Aufnahmen, **● LIVE** wieder zurück
+  - Tage per ◀ ▶ wechseln; Uhrzeit direkt eingeben
   - Tasten: Leertaste, ←/→ (10 s), Umschalt+←/→ (1 min)
   - Vorschaubilder und Bewegungswerte erzeugt AleCast nach jedem Upload im Hintergrund (auch für ältere Aufnahmen)
 

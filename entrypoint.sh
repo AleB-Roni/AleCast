@@ -21,6 +21,8 @@ log() {
 
 SERVER_JAR=/data/local/tmp/alecast-scrcpy-server.jar
 LOCAL_PORT=27183
+# Eigene scrcpy-Kennung für den RTSP-Stream, damit der Live-Stream der Web-UI parallel laufen kann
+RTSP_SCID=0a1ec057
 SERVER_PID=""
 TAP_PID=""
 CENTER_PID=""
@@ -34,8 +36,8 @@ cleanup() {
   [ -n "${WEBUI_PID:-}" ] && kill "${WEBUI_PID}" 2>/dev/null
   [ -n "${WATCHDOG_PID:-}" ] && kill "${WATCHDOG_PID}" 2>/dev/null
   [ -n "${SERVER_PID}" ] && kill "${SERVER_PID}" 2>/dev/null
-  adb shell pkill -f com.genymobile.scrcpy >/dev/null 2>&1
-  adb forward --remove-all >/dev/null 2>&1
+  adb shell pkill -f "scid=${RTSP_SCID}" >/dev/null 2>&1
+  adb forward --remove "tcp:${LOCAL_PORT}" >/dev/null 2>&1
   exit 0
 }
 trap cleanup SIGTERM SIGINT
@@ -181,11 +183,11 @@ start_server() {
   local max_size
   max_size="$(setting max-size)"
   [ -z "${max_size}" ] && max_size="${MAX_SIZE}"
-  adb shell pkill -f com.genymobile.scrcpy >/dev/null 2>&1
-  adb forward --remove-all >/dev/null 2>&1
-  adb forward "tcp:${LOCAL_PORT}" localabstract:scrcpy >/dev/null || return 1
+  adb shell pkill -f "scid=${RTSP_SCID}" >/dev/null 2>&1
+  adb forward --remove "tcp:${LOCAL_PORT}" >/dev/null 2>&1
+  adb forward "tcp:${LOCAL_PORT}" "localabstract:scrcpy_${RTSP_SCID}" >/dev/null || return 1
   adb shell CLASSPATH="${SERVER_JAR}" app_process / com.genymobile.scrcpy.Server "${SCRCPY_VERSION}" \
-    tunnel_forward=true audio=false control=false cleanup=false raw_stream=true \
+    scid="${RTSP_SCID}" tunnel_forward=true audio=false control=false cleanup=false raw_stream=true \
     video_codec=h264 max_size="${max_size}" max_fps="${MAX_FPS}" \
     video_bit_rate="${VIDEO_BIT_RATE}" &
   SERVER_PID=$!

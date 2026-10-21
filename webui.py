@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import recorder  # noqa: E402
+import live  # noqa: E402
 
 PORT = int(os.environ.get("WEBUI_PORT", "8080"))
 PASSWORD = os.environ.get("WEBUI_PASSWORD", "")
@@ -334,6 +335,16 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(recorder.list_overview())
             except (ValueError, OSError) as e:
                 self._send(400, str(e).encode(), "text/plain; charset=utf-8")
+        elif path == "/api/live":
+            self._json(live.stream.status())
+        elif path == "/live.mjpg":
+            self._live_mjpeg()
+        elif path == "/live.jpg":
+            frame = live.stream.latest()
+            if frame:
+                self._send(200, frame, "image/jpeg")
+            else:
+                self._send(503, (live.stream.error or "kein Live-Bild").encode(), "text/plain; charset=utf-8")
         elif path.startswith("/rec/"):
             self._send_file(unquote(path[len("/rec/"):]))
         else:
@@ -380,6 +391,26 @@ class Handler(BaseHTTPRequestHandler):
                     remaining -= len(chunk)
         except (BrokenPipeError, ConnectionResetError):
             pass
+
+    def _live_mjpeg(self):
+        if not live.device_connected():
+            self._send(503, "Handy nicht per USB an AleCast verbunden".encode(), "text/plain; charset=utf-8")
+            return
+        live.stream.acquire()
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=alecastframe")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            for frame in live.stream.frames():
+                self.wfile.write(b"--alecastframe\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                                 + str(len(frame)).encode() + b"\r\n\r\n" + frame + b"\r\n")
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            live.stream.release()
 
     def _upload(self):
         q = parse_qs(urlparse(self.path).query)
