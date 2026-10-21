@@ -93,6 +93,7 @@ aside{border-left:1px solid var(--line);display:flex;flex-direction:column;min-h
       <input type="time" id="jump" step="1" title="Zu Uhrzeit springen" style="background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:5px 8px;font:inherit">
       <a id="dl" href="#" download class="muted">Segment ⇩</a>
     </div>
+    <div class="muted" id="liveNote" style="display:none"></div>
     <div class="muted" id="info"></div>
     <div class="muted kbd">Tasten: Leertaste = Pause · ←/→ = 10 s · Umschalt+←/→ = 1 min · Zeitstrahl antippen = springen · ● LIVE = aktuelles Handybild</div>
   </section>
@@ -282,12 +283,23 @@ async function goLive(){
   const im=$("liveImg"); im.style.display="block"; im.src="live.mjpg?"+Date.now();
   $("live").classList.add("on"); $("liveTag").style.display="inline-block";
   $("play").textContent="● Live"; $("play").disabled=true; $("speed").disabled=true;
-  clearInterval(liveTimer); liveTimer=setInterval(()=>updateCursor(false),1000); updateCursor(true);
+  clearInterval(liveTimer); let tick=0;
+  liveTimer=setInterval(()=>{updateCursor(false); if(++tick%4===1)liveStatus()},1000); updateCursor(true);
   history.replaceState(null,"",`#cam=${encodeURIComponent($("cam").value)}`);
   return true;
 }
+async function liveStatus(){
+  try{
+    const st=await j("api/live"), n=$("liveNote"); let txt="";
+    if(st.mode==="screenshot") txt="Live per Bildschirmfoto (ca. 1 Bild/s) – der Video-Live-Strom ließ sich auf dem Handy nicht starten.";
+    if(st.error&&(st.last_frame_age==null||st.last_frame_age>10)) txt+=(txt?" ":"")+"Status: "+st.error;
+    else if(st.last_frame_age==null) txt="Live-Bild wird gestartet …";
+    n.textContent=txt; n.style.display=txt?"block":"none";
+  }catch(e){}
+}
 function leaveLive(){
   if(!liveMode)return;
+  $("liveNote").style.display="none";
   liveMode=false; clearInterval(liveTimer);
   const im=$("liveImg"); im.removeAttribute("src"); im.style.display="none";
   v.style.display="block"; $("live").classList.remove("on"); $("liveTag").style.display="none";

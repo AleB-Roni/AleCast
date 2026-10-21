@@ -1,6 +1,8 @@
 """Live-Bild des Handys für die Web-UI: scrcpy-Server (eigene Kennung) -> ffmpeg -> MJPEG.
 Läuft nur, solange jemand zuschaut, und mehrere Zuschauer teilen sich einen Datenstrom."""
+import collections
 import os
+import socket
 import subprocess
 import threading
 import time
@@ -38,14 +40,19 @@ class LiveStream:
         self._server = None
         self._ffmpeg = None
         self._thread = None
+        self._server_log = collections.deque(maxlen=30)
+        self._last_frame_at = 0.0
+        self.mode = "scrcpy"
         self.error = ""
         threading.Thread(target=self._janitor, daemon=True).start()
 
     # ---------- öffentlich ----------
 
     def status(self):
-        return {"available": device_connected(), "running": self._running,
-                "clients": self._clients, "error": self.error}
+        return {"available": device_connected(), "running": self._running, "mode": self.mode,
+                "clients": self._clients, "error": self.error,
+                "last_frame_age": round(time.time() - self._last_frame_at, 1) if self._last_frame_at else None,
+                "server_log": list(self._server_log)[-8:]}
 
     def acquire(self):
         with self._lock:
@@ -114,16 +121,37 @@ class LiveStream:
         _adb("shell", "pkill", "-f", f"scid={SCID}", timeout=5)
         _adb("forward", "--remove", f"tcp:{PORT}", timeout=5)
 
+    def _log(self, msg):
+        print(f"[AleCast-Live] {msg}", flush=True)
+
+    def _publish(self, frame):
+        with self._cond:
+            self._frame = frame
+            self._seq += 1
+            self._last_frame_at = time.time()
+            self._cond.notify_all()
+
     def _run(self):
+        failures = 0
         while self._running:
             if not device_connected():
                 self.error = "Handy nicht per USB verbunden"
                 time.sleep(3)
                 continue
+            if failures >= 1:
+                # scrcpy klappt nicht: ersatzweise Bildschirmfotos (ca. 1 Bild/s)
+                self.mode = "screenshot"
+                self._log("Live per scrcpy nicht möglich – weiche auf Bildschirmfotos aus")
+                self._screenshot_loop()
+                break
+            self.mode = "scrcpy"
             try:
-                self._stream_once()
+                got = self._stream_once()
+                failures = 0 if got else failures + 1
             except Exception as e:  # noqa: BLE001
+                failures += 1
                 self.error = str(e)
+                self._log(f"Fehler: {e}")
             finally:
                 self._kill()
                 self._stop_device_side()
@@ -131,31 +159,112 @@ class LiveStream:
                 time.sleep(2)
         self._kill()
         self._stop_device_side()
+        self.mode = "scrcpy"
         with self._cond:
             self._frame = None
             self._cond.notify_all()
 
+    def _read_server_log(self, proc):
+        try:
+            for line in proc.stdout:
+                line = line.strip()
+                if line:
+                    self._server_log.append(line)
+                    self._log("Handy: " + line)
+        except (ValueError, OSError):
+            pass
+
+    def _connect(self, deadline):
+        """Verbindet sich mit dem scrcpy-Server. Solange er noch startet, schließt adb die
+        Verbindung sofort wieder – dann erneut versuchen, statt den Server neu zu starten."""
+        while time.time() < deadline and self._running:
+            if self._server and self._server.poll() is not None:
+                return None, b""
+            try:
+                sock = socket.create_connection(("127.0.0.1", PORT), timeout=2)
+                sock.settimeout(4)
+                try:
+                    first = sock.recv(65536)
+                except socket.timeout:
+                    first = b"\x00"[:0]
+                    return sock, first  # verbunden, Bild kommt gleich
+                if first:
+                    return sock, first
+                sock.close()
+            except OSError:
+                pass
+            time.sleep(0.5)
+        return None, b""
+
     def _stream_once(self):
-        if DEVICE_JAR not in _adb("shell", "ls", DEVICE_JAR, timeout=5):
+        """True, wenn mindestens ein Bild kam."""
+        listing = _adb("shell", "ls", DEVICE_JAR, timeout=5)
+        if DEVICE_JAR not in listing or "No such file" in listing:
             _adb("push", LOCAL_JAR, DEVICE_JAR, timeout=30)
         self._stop_device_side()
         _adb("forward", f"tcp:{PORT}", f"localabstract:scrcpy_{SCID}")
+        self._server_log.clear()
         self._server = subprocess.Popen(
             ["adb", "shell", f"CLASSPATH={DEVICE_JAR}", "app_process", "/", "com.genymobile.scrcpy.Server",
              SCRCPY_VERSION, f"scid={SCID}", "tunnel_forward=true", "audio=false", "control=false",
              "cleanup=false", "raw_stream=true", "video_codec=h264", f"max_size={MAX_SIZE}",
-             "max_fps=15", "video_bit_rate=3000000", "log_level=error"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(1.5)
+             "max_fps=15", "video_bit_rate=3000000", "log_level=info"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        threading.Thread(target=self._read_server_log, args=(self._server,), daemon=True).start()
+
+        # Sofort ein Standbild zeigen, bis das Video läuft
+        threading.Thread(target=self._one_screenshot, daemon=True).start()
+        sock, first = self._connect(time.time() + 12)
+        if sock is None:
+            log = " | ".join(list(self._server_log)[-3:]) or "keine Antwort"
+            raise RuntimeError(f"scrcpy-Server startet nicht: {log}")
+
         self._ffmpeg = subprocess.Popen(
             ["ffmpeg", "-v", "error", "-fflags", "nobuffer", "-flags", "low_delay",
-             "-probesize", "32768", "-analyzeduration", "0",
-             "-f", "h264", "-i", f"tcp://127.0.0.1:{PORT}",
-             "-vf", f"fps={FPS}", "-q:v", "6", "-f", "mjpeg", "-"],
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+             "-probesize", "65536", "-analyzeduration", "500000",
+             "-f", "h264", "-i", "-", "-vf", f"fps={FPS}", "-q:v", "6", "-f", "mjpeg", "-"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        ff = self._ffmpeg
+
+        def pump():
+            try:
+                if first:
+                    ff.stdin.write(first)
+                sock.settimeout(None)
+                while self._running:
+                    data = sock.recv(65536)
+                    if not data:
+                        break
+                    ff.stdin.write(data)
+            except OSError:
+                pass
+            finally:
+                try:
+                    sock.close()
+                    ff.stdin.close()
+                except OSError:
+                    pass
+        threading.Thread(target=pump, daemon=True).start()
+
         self.error = ""
+        got = False
+        started = time.time()
+
+        def watchdog():
+            # Hängt der Strom (kein Bild seit 20 s), Verbindung kappen -> Neustart
+            while ff.poll() is None and self._running:
+                time.sleep(2)
+                if time.time() - max(started, self._last_frame_at) > 20:
+                    self._log("Kein Bild seit 20 s – starte Live-Strom neu")
+                    try:
+                        sock.close()
+                    except OSError:
+                        pass
+                    ff.kill()
+                    break
+        threading.Thread(target=watchdog, daemon=True).start()
         buf = b""
-        out = self._ffmpeg.stdout
+        out = ff.stdout
         while self._running:
             chunk = out.read1(65536) if hasattr(out, "read1") else out.read(65536)
             if not chunk:
@@ -170,12 +279,45 @@ class LiveStream:
                     break
                 frame = buf[start:end + 2]
                 buf = buf[end + 2:]
-                with self._cond:
-                    self._frame = frame
-                    self._seq += 1
-                    self._cond.notify_all()
+                if not got:
+                    self._log(f"Live-Bild läuft (erstes Bild nach {time.time() - started:.1f} s)")
+                got = True
+                self._publish(frame)
             if len(buf) > 8_000_000:  # Schutz gegen Müll im Datenstrom
                 buf = b""
+        if not got:
+            log = " | ".join(list(self._server_log)[-3:])
+            self.error = "scrcpy liefert keine Bilder" + (f": {log}" if log else "")
+        return got
+
+    def _grab_jpeg(self):
+        png = subprocess.run(["adb", "exec-out", "screencap", "-p"], capture_output=True, timeout=8).stdout
+        if png[:4] != b"\x89PNG":
+            return None
+        return subprocess.run(
+            ["ffmpeg", "-v", "error", "-f", "png_pipe", "-i", "-",
+             "-vf", f"scale='min({MAX_SIZE},iw)':-2", "-q:v", "6", "-f", "mjpeg", "-"],
+            input=png, capture_output=True, timeout=8).stdout or None
+
+    def _one_screenshot(self):
+        try:
+            started = time.time()
+            jpg = self._grab_jpeg()
+            if jpg and self._last_frame_at < started:
+                self._publish(jpg)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+
+    def _screenshot_loop(self):
+        while self._running and device_connected():
+            t0 = time.time()
+            try:
+                jpg = self._grab_jpeg()
+                if jpg:
+                    self._publish(jpg)
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+            time.sleep(max(0.0, 1.0 - (time.time() - t0)))
 
 
 stream = LiveStream()
