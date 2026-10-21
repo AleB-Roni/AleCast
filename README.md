@@ -159,11 +159,20 @@ Android-App im Ordner `android/`. Jede Änderung baut automatisch eine neue APK 
 - AleCast speichert wie Frigate: `/recordings/JJJJ-MM-TT/HH/<kamera>/MM.SS.mp4` und löscht nach `RETAIN_DAYS` Tagen.
 - Ansehen: **▶ Aufnahmen** in der AleCast-Web-UI (`/recordings`) – Kamera, Tag, Zeitleiste, Segmente laufen nahtlos hintereinander.
 
+### Tipp-Punkte (Streams automatisch aktualisieren)
+
+**⊙ Tipp-Punkte** in AleCorder: auf das letzte Bildschirmfoto tippen, um Punkte zu setzen (ziehen = verschieben). Pro Punkt:
+- **alle X s** – Intervall,
+- **Versatz** – zusätzliche Verzögerung, um Abfolgen zu bauen (z. B. Punkt 1 „Bild antippen“ mit Versatz 0, Punkt 2 „Aktualisieren“ mit Versatz 2 → 2 s nacheinander),
+- **Test** – wechselt zur vorherigen App und tippt den Punkt nach 2 s einmal an.
+
+Getippt wird über die Bedienungshilfe **„AleCorder Tipp-Automatik“** (kein Root nötig). Solange AleCorder selbst offen ist, wird nicht getippt.
+
 ### Dauerbetrieb mit AleCast per USB
 
 Ist das Handy per USB an AleCast angeschlossen, setzt AleCast automatisch:
 - `appops PROJECT_MEDIA allow` → keine Rückfrage bei der Bildschirmaufnahme,
-- „Über anderen Apps einblenden“ und Akku-Ausnahme,
+- „Über anderen Apps einblenden“, Akku-Ausnahme und die Bedienungshilfe für die Tipp-Punkte,
 - einen **Watchdog**, der AleCorder nach Neustart/Absturz wieder startet (nur wenn vorher aufgenommen wurde; **Stopp** in der App wird respektiert).
 
 RTSP-Streaming ist jetzt optional: `RTSP_URL` leer lassen, wenn nur AleCorder aufnehmen soll – dann läuft das Handy-Encoder-Budget komplett für AleCorder.

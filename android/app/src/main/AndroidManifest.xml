@@ -34,6 +34,11 @@
             android:label="Ausschnitt wählen" />
 
         <activity
+            android:name=".TapActivity"
+            android:exported="false"
+            android:label="Tipp-Punkte" />
+
+        <activity
             android:name=".ProjectionRequestActivity"
             android:excludeFromRecents="true"
             android:exported="true"
@@ -44,6 +49,19 @@
             android:name=".RecorderService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
+
+        <service
+            android:name=".TapService"
+            android:exported="true"
+            android:label="@string/tap_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/tap_service" />
+        </service>
 
         <receiver
             android:name=".BootReceiver"

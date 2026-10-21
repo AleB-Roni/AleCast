@@ -19,6 +19,10 @@ object RecorderState {
     @Volatile var lastSnapshot: Bitmap? = null
     @Volatile var lastSnapshotAt = 0L
 
+    /** Tipp-Automatik */
+    @Volatile var tapStatus = "aus"
+    @Volatile var lastTap = ""
+
     /** Wird von den eigenen Activities gesetzt, damit der Snapshot nicht AleCorder selbst zeigt. */
     @Volatile var appVisible = false
 }

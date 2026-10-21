@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tap_service_label">AleCorder Tipp-Automatik</string>
+    <string name="tap_service_description">Tippt die in AleCorder festgelegten Punkte in einstellbaren Abständen an, z. B. um einen Kamera-Stream zu aktualisieren. Liest keine Bildschirminhalte.</string>
+</resources>

@@ -60,6 +60,9 @@ class MainActivity : Activity() {
         ))
         ctl.addView(Ui.buttonRow(this,
             Ui.button(this, "▭ Ausschnitt wählen") { startActivity(Intent(this, CropActivity::class.java)) },
+            Ui.button(this, "⊙ Tipp-Punkte") { startActivity(Intent(this, TapActivity::class.java)) },
+        ))
+        ctl.addView(Ui.buttonRow(this,
             Ui.button(this, "Aufnahmen ansehen") { openRecordings() },
         ))
         root.addView(ctl)
@@ -189,6 +192,9 @@ class MainActivity : Activity() {
             if (crop.isFull) "ganzer Bildschirm"
             else "${(crop.w * 100).toInt()} × ${(crop.h * 100).toInt()} % ab X ${(crop.x * 100).toInt()} %, Y ${(crop.y * 100).toInt()} %",
         )
+        val tapOn = TapService.isEnabled(this)
+        sb.append("\nTipp-Automatik: ").append(if (tapOn) RecorderState.tapStatus else "Bedienungshilfe aus")
+        if (RecorderState.lastTap.isNotEmpty()) sb.append(" · zuletzt ").append(RecorderState.lastTap)
         s.lastError?.let { sb.append("\n⚠ ").append(it) }
         return sb.toString()
     }

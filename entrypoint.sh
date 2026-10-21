@@ -78,6 +78,15 @@ alecorder_permissions() {
   adb shell appops set "${ALECORDER_PKG}" PROJECT_MEDIA allow >/dev/null 2>&1
   adb shell appops set "${ALECORDER_PKG}" SYSTEM_ALERT_WINDOW allow >/dev/null 2>&1
   adb shell dumpsys deviceidle whitelist "+${ALECORDER_PKG}" >/dev/null 2>&1
+  # Bedienungshilfe "AleCorder Tipp-Automatik" einschalten (für die Tipp-Punkte)
+  local svc="${ALECORDER_PKG}/${ALECORDER_PKG}.TapService" cur
+  cur="$(adb shell settings get secure enabled_accessibility_services 2>/dev/null | tr -d '\r')"
+  case "${cur}" in
+    *"${ALECORDER_PKG}/"*) ;;
+    ""|null) adb shell settings put secure enabled_accessibility_services "${svc}" >/dev/null 2>&1 ;;
+    *) adb shell settings put secure enabled_accessibility_services "${cur}:${svc}" >/dev/null 2>&1 ;;
+  esac
+  adb shell settings put secure accessibility_enabled 1 >/dev/null 2>&1
 }
 
 # Startet AleCorder neu, wenn er aufnehmen soll, aber nicht läuft (z. B. nach Neustart oder Absturz)

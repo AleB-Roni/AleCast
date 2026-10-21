@@ -97,6 +97,15 @@ class Prefs(ctx: Context) {
                 .putFloat("crop_w", s.w).putFloat("crop_h", s.h).apply()
         }
 
+    /** Tipp-Automatik global an/aus. */
+    var tapEnabled: Boolean
+        get() = p.getBoolean("tap_enabled", true)
+        set(v) = p.edit().putBoolean("tap_enabled", v).apply()
+
+    var tapPoints: List<TapPoint>
+        get() = TapPoint.fromJson(p.getString("tap_points", "[]")!!)
+        set(v) = p.edit().putString("tap_points", TapPoint.toJson(v)).apply()
+
     fun encoderSettings() = EncoderSettings(
         crop = crop,
         fps = fps,
