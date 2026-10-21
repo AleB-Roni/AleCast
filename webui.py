@@ -27,9 +27,28 @@ _screen_lock = threading.Lock()
 _last_size = {"w": 0, "h": 0}
 
 
+ENV_RTSP_URL = os.environ.get("RTSP_URL", "").strip()
+ENV_RETAIN_DAYS = int(os.environ.get("RETAIN_DAYS", "5") or 5)
+
+
 def default_settings():
+    # streaming/retain_days = None bedeutet: Wert aus den Container-Variablen verwenden
     return {"crop": {"enabled": False, "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0},
-            "out_width": 0, "source_size": 0}
+            "out_width": 0, "source_size": 0,
+            "streaming": None, "rtsp_url": "", "retain_days": None}
+
+
+def effective(s):
+    """Tatsächlich gültige Werte (Web-UI-Einstellung, sonst Container-Variable)."""
+    url = s.get("rtsp_url") or ENV_RTSP_URL
+    streaming = s.get("streaming")
+    if streaming is None:
+        streaming = bool(ENV_RTSP_URL)
+    days = s.get("retain_days")
+    if days is None:
+        days = ENV_RETAIN_DAYS
+    return {"streaming": bool(streaming) and bool(url), "streaming_wanted": bool(streaming),
+            "rtsp_url": url, "retain_days": int(days)}
 
 
 def load_settings():
@@ -46,6 +65,11 @@ def load_settings():
             s["out_width"] = int(data["out_width"])
         if int(data.get("source_size", 0)) in SOURCE_SIZES:
             s["source_size"] = int(data["source_size"])
+        if data.get("streaming") is not None:
+            s["streaming"] = bool(data["streaming"])
+        s["rtsp_url"] = str(data.get("rtsp_url") or "")
+        if data.get("retain_days") is not None:
+            s["retain_days"] = int(data["retain_days"])
     except (OSError, ValueError, TypeError, AttributeError):
         pass
     return s
@@ -75,6 +99,18 @@ def save_settings(body):
         if ss not in SOURCE_SIZES:
             raise ValueError("ungültige Quellauflösung")
         s["source_size"] = ss
+    if "streaming" in body:
+        s["streaming"] = bool(body["streaming"])
+    if "rtsp_url" in body:
+        url = str(body["rtsp_url"] or "").strip()
+        if url and not url.startswith(("rtsp://", "rtsps://")):
+            raise ValueError("RTSP-Ziel muss mit rtsp:// beginnen")
+        s["rtsp_url"] = url
+    if "retain_days" in body:
+        days = int(body["retain_days"])
+        if not 0 <= days <= 3650:
+            raise ValueError("Aufbewahrung muss zwischen 0 und 3650 Tagen liegen")
+        s["retain_days"] = days
     os.makedirs(os.path.dirname(SETTINGS_FILE) or ".", exist_ok=True)
     tmp = SETTINGS_FILE + ".tmp"
     with open(tmp, "w") as f:
@@ -285,7 +321,8 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/status":
             self._json(status())
         elif path == "/api/settings":
-            self._json(load_settings())
+            cur = load_settings()
+            self._json({**cur, "effective": effective(cur)})
         elif path == "/recordings":
             self._send(200, recorder.REC_PAGE.encode(), "text/html; charset=utf-8")
         elif path == "/api/recordings":
@@ -367,9 +404,14 @@ class Handler(BaseHTTPRequestHandler):
             length = min(int(self.headers.get("Content-Length", "0")), 10000)
             body = json.loads(self.rfile.read(length) or b"{}")
             if self.path == "/api/settings":
+                before = load_settings()
                 s = save_settings(body)
-                restart_stream()
-                self._json({"ok": True, "msg": "gespeichert", "settings": s})
+                stream_keys = ("crop", "out_width", "source_size", "streaming", "rtsp_url")
+                if any(before.get(k) != s.get(k) for k in stream_keys) or before["rtsp_url"] != s["rtsp_url"]:
+                    restart_stream()
+                if before.get("retain_days") != s.get("retain_days"):
+                    threading.Thread(target=recorder.cleanup_once, daemon=True).start()
+                self._json({"ok": True, "msg": "gespeichert", "settings": s, "effective": effective(s)})
                 return
             ok, msg = do_action(body)
         except (ValueError, KeyError, TypeError, OSError) as e:
@@ -428,6 +470,10 @@ button.on{background:var(--accent);color:#1a1006;border-color:var(--accent)}
 .sel{display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center;font-size:12px;color:var(--muted);margin-bottom:8px}
 .sel select{width:100%;padding:6px}
 .note{font-size:11px;color:var(--muted);margin-top:8px}
+.tog{display:flex;align-items:center;gap:8px;font-size:14px;margin-bottom:10px;cursor:pointer}
+.tog input{width:18px;height:18px;accent-color:var(--accent)}
+.field{display:flex;flex-direction:column;gap:4px;margin-bottom:10px;font-size:12px;color:var(--muted)}
+.field input{width:100%;background:#0d0f11;color:var(--text);border:1px solid var(--line);border-radius:7px;padding:8px;font:inherit}
 #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);padding:8px 14px;border-radius:8px;opacity:0;transition:opacity .2s;pointer-events:none}
 </style>
 </head>
@@ -474,8 +520,16 @@ button.on{background:var(--accent);color:#1a1006;border-color:var(--accent)}
         <button data-rot="0">Hochformat</button>
       </div>
     </div>
+    <div class="card" id="settings">
+      <h2>Streaming &amp; Aufbewahrung</h2>
+      <label class="tog"><input type="checkbox" id="stOn"> RTSP-Streaming an Frigate</label>
+      <div class="field"><span>RTSP-Ziel</span><input type="text" id="stUrl" placeholder="rtsp://192.168.178.108:8554/tapo_app"></div>
+      <div class="field"><span>Aufnahmen behalten (Tage, 0 = unbegrenzt)</span><input type="number" id="retDays" min="0" max="3650"></div>
+      <button class="primary" id="stSave" style="width:100%">Speichern</button>
+      <div class="note" id="stInfo"></div>
+    </div>
     <div class="card">
-      <h2>Aufnahmebereich</h2>
+      <h2>Ausschnitt (RTSP-Stream)</h2>
       <div class="grid grid2">
         <button id="cropMode">▭ Bereich ziehen</button>
         <button id="cropFull">Ganzer Bildschirm</button>
@@ -666,7 +720,30 @@ async function poll(){
   }catch(e){}
   setTimeout(poll,5000);
 }
-refresh(); poll(); loadSettings();
+
+/* ---------- Streaming & Aufbewahrung ---------- */
+function stInfo(e){
+  const parts=[];
+  if(e.streaming) parts.push("Streaming an → "+e.rtsp_url);
+  else if(e.streaming_wanted&&!e.rtsp_url) parts.push("Streaming an, aber kein RTSP-Ziel eingetragen");
+  else parts.push("Streaming aus – nur AleCorder-Aufnahmen");
+  parts.push(e.retain_days>0?("Aufnahmen werden nach "+e.retain_days+" Tagen gelöscht"):"Aufnahmen werden nie gelöscht");
+  $("stInfo").textContent=parts.join(" · ");
+}
+async function loadStream(){
+  try{const s=await (await fetch("api/settings")).json(), e=s.effective;
+    $("stOn").checked=e.streaming_wanted; $("stUrl").value=e.rtsp_url; $("retDays").value=e.retain_days; stInfo(e);
+  }catch(err){}
+}
+$("stSave").onclick=async()=>{
+  const body={streaming:$("stOn").checked,rtsp_url:$("stUrl").value.trim(),retain_days:parseInt($("retDays").value||"0",10)};
+  try{
+    const r=await fetch("api/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const j=await r.json();
+    if(j.ok){stInfo(j.effective);toast(j.effective.streaming?"Gespeichert – Stream startet":"Gespeichert")}else toast("Fehler: "+j.msg);
+  }catch(e){toast("Keine Verbindung")}
+};
+refresh(); poll(); loadSettings(); loadStream();
 </script>
 </body>
 </html>
@@ -680,7 +757,12 @@ if __name__ == "__main__":
             print(ffmpeg_filter(cur))
         elif sys.argv[1] == "--get-max-size":
             print(cur["source_size"] or "")
+        elif sys.argv[1] == "--get-streaming":
+            print("1" if effective(cur)["streaming"] else "0")
+        elif sys.argv[1] == "--get-rtsp-url":
+            print(effective(cur)["rtsp_url"])
         sys.exit(0)
     print(f"[AleCast] Web-UI auf Port {PORT}" + (" (mit Passwort)" if PASSWORD else ""), flush=True)
+    recorder.retain_days_provider = lambda: effective(load_settings())["retain_days"]
     recorder.start_cleanup_thread()
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

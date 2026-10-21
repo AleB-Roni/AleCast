@@ -16,10 +16,6 @@ log() {
   fi
 }
 
-STREAMING=1
-if [ -z "${RTSP_URL:-}" ]; then
-  STREAMING=0
-fi
 
 [ -n "${ADB_SERIAL}" ] && export ANDROID_SERIAL="${ADB_SERIAL}"
 
@@ -213,14 +209,14 @@ run_ffmpeg() {
   else
     out_args=(-c copy)
   fi
-  ffmpeg "${in_args[@]}" -an "${out_args[@]}" -rtsp_transport tcp -f rtsp "${RTSP_URL}"
+  ffmpeg "${in_args[@]}" -an "${out_args[@]}" -rtsp_transport tcp -f rtsp "${RTSP_TARGET}"
 }
 
-if [ "${STREAMING}" = "1" ]; then
-  log "Start – Ziel: ${RTSP_URL}"
-else
-  log "Start ohne RTSP-Streaming (nur Web-UI, Aufnahme-Server und Auto-Tap)"
-fi
+# RTSP-Streaming lässt sich in der Web-UI an/aus schalten (ohne Container-Neustart)
+streaming_on() { [ "$(setting streaming)" = "1" ]; }
+RTSP_TARGET=""
+LAST_MODE=""
+log "Start"
 mkdir -p "${RECORDINGS_DIR:-/recordings}" 2>/dev/null
 
 WEBUI_PID=""
@@ -253,17 +249,30 @@ while true; do
     WATCHDOG_PID=$!
   fi
 
-  if [ "${STREAMING}" = "0" ]; then
-    # Kein Streaming: nur warten, solange das Handy verbunden ist
-    while [ "$(adb get-state 2>/dev/null)" = "device" ]; do sleep 10; done
-    log "Handy getrennt"
+  if ! streaming_on; then
+    # Kein Streaming: warten, bis es in der Web-UI eingeschaltet oder das Handy getrennt wird
+    if [ "${LAST_MODE}" != "off" ]; then
+      log "RTSP-Streaming aus – nur Web-UI, AleCorder-Aufnahmen und Auto-Tap"
+      LAST_MODE="off"
+    fi
+    while [ "$(adb get-state 2>/dev/null)" = "device" ] && ! streaming_on; do sleep 5; done
+    [ "$(adb get-state 2>/dev/null)" = "device" ] || log "Handy getrennt"
     continue
   fi
 
+  RTSP_TARGET="$(setting rtsp-url)"
+  if [ "${LAST_MODE}" != "on" ]; then
+    log "RTSP-Streaming an – Ziel: ${RTSP_TARGET}"
+    LAST_MODE="on"
+  fi
   start_server || { log "adb forward fehlgeschlagen"; sleep 5; continue; }
   log "Stream läuft ..."
   run_ffmpeg
-  log "Stream unterbrochen – starte neu in 3s"
+  if streaming_on; then
+    log "Stream unterbrochen – starte neu in 3s"
+  else
+    log "Stream beendet (in der Web-UI ausgeschaltet)"
+  fi
   kill "${SERVER_PID}" 2>/dev/null
   SERVER_PID=""
   sleep 3

@@ -91,6 +91,15 @@ Port `8080` im Container auf einen freien Host-Port legen (Vorlage: `8086`), dan
 - Text ans Handy senden (nur ASCII, keine Umlaute – Einschränkung von `adb input text`)
 - Status: Akku, Temperatur, ob Tapo im Vordergrund ist, AleCast-Log
 
+### Streaming & Aufbewahrung
+
+Karte **Streaming & Aufbewahrung** in der Web-UI:
+- **RTSP-Streaming an Frigate** an/aus – wirkt sofort, ohne Container-Neustart. Aus = das Handy nimmt nur noch per AleCorder auf; später einfach wieder einschalten.
+- **RTSP-Ziel** – überschreibt die Container-Variable `RTSP_URL`.
+- **Aufnahmen behalten (Tage)** – überschreibt `RETAIN_DAYS`, `0` = nie löschen. Ältere Tage werden sofort nach dem Speichern gelöscht.
+
+Die Einstellungen liegen in `alecast-settings.json` im ADB-Schlüssel-Ordner und gelten auch nach Neustarts; die Container-Variablen sind nur noch Startwerte.
+
 ### Aufnahmebereich (Ausschnitt & Skalierung)
 
 Karte **Aufnahmebereich**: **Bereich ziehen** aktivieren und ein Rechteck über das Bild ziehen, eine Vorlage wählen (Links/Rechts/Oben/Unten ½, Zentrum) oder X/Y/Breite/Höhe in Prozent eintippen. Dann **Übernehmen** – der Stream startet mit dem Ausschnitt neu.

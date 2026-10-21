@@ -9,7 +9,18 @@ import threading
 import time
 
 RECORDINGS_DIR = os.environ.get("RECORDINGS_DIR", "/recordings")
-RETAIN_DAYS = int(os.environ.get("RETAIN_DAYS", "5"))
+RETAIN_DAYS = int(os.environ.get("RETAIN_DAYS", "5") or 5)
+# Wird von der Web-UI gesetzt, damit die Aufbewahrung ohne Neustart änderbar ist
+retain_days_provider = None
+
+
+def retain_days():
+    if retain_days_provider:
+        try:
+            return int(retain_days_provider())
+        except (ValueError, TypeError):
+            pass
+    return RETAIN_DAYS
 MAX_UPLOAD = 1024 * 1024 * 1024  # 1 GB pro Segment
 INDEX = "segments.jsonl"
 _index_lock = threading.Lock()
@@ -92,7 +103,7 @@ def list_overview():
         total, used, free = shutil.disk_usage(RECORDINGS_DIR)
     except OSError:
         pass
-    return {"cameras": sorted(cams), "days": days, "retain_days": RETAIN_DAYS,
+    return {"cameras": sorted(cams), "days": days, "retain_days": retain_days(),
             "disk_free_gb": round(free / 1e9, 1), "disk_total_gb": round(total / 1e9, 1)}
 
 
@@ -133,14 +144,15 @@ def resolve_file(rel):
 
 
 def cleanup_once():
-    if RETAIN_DAYS <= 0:
+    days = retain_days()
+    if days <= 0:
         return
-    cutoff = (dt.date.today() - dt.timedelta(days=RETAIN_DAYS)).isoformat()
+    cutoff = (dt.date.today() - dt.timedelta(days=days)).isoformat()
     try:
         for d in os.listdir(RECORDINGS_DIR):
             if _date_re.match(d) and d < cutoff:
                 shutil.rmtree(os.path.join(RECORDINGS_DIR, d), ignore_errors=True)
-                print(f"[AleCast] Aufnahmen vom {d} gelöscht (älter als {RETAIN_DAYS} Tage)", flush=True)
+                print(f"[AleCast] Aufnahmen vom {d} gelöscht (älter als {days} Tage)", flush=True)
     except OSError:
         pass
 
@@ -212,7 +224,7 @@ const fmt=ms=>{const d=new Date(ms);return pad(d.getHours())+":"+pad(d.getMinute
 async function j(u){const r=await fetch(u);if(!r.ok)throw new Error(await r.text());return r.json()}
 async function init(){
   const o=await j("api/recordings");
-  $("disk").textContent=`Aufbewahrung ${o.retain_days} Tage · ${o.disk_free_gb} GB frei`;
+  $("disk").innerHTML=`Aufbewahrung ${o.retain_days>0?o.retain_days+" Tage":"unbegrenzt"} (<a href="./#settings">ändern</a>) · ${o.disk_free_gb} GB frei`;
   if(!o.cameras.length){$("empty").style.display="block";return}
   $("cam").innerHTML=o.cameras.map(c=>`<option>${c}</option>`).join("");
   $("day").innerHTML=o.days.map(d=>`<option>${d}</option>`).join("");
