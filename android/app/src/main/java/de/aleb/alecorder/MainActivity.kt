@@ -64,7 +64,7 @@ class MainActivity : Activity() {
             Ui.button(this, "⊙ Tipp-Punkte") { startActivity(Intent(this, TapActivity::class.java)) },
         ))
         ctl.addView(Ui.buttonRow(this,
-            Ui.button(this, "Aufnahmen ansehen") { openRecordings() },
+            Ui.button(this, "◷ Verlauf ansehen", primary = true) { startActivity(Intent(this, HistoryActivity::class.java)) },
         ))
         root.addView(ctl)
 

@@ -166,7 +166,13 @@ Android-App im Ordner `android/`. Jede Änderung baut automatisch eine neue APK 
 - Aufnahme per MediaProjection, Ausschnitt/Skalierung per OpenGL, H.264-Hardware-Encoder, feste Bildrate.
 - Segmente (Standard 60 s) werden der Reihe nach per HTTP an `POST /api/upload` geschickt. Ist der Server weg, puffert die App lokal (Standard bis 2 GB) und lädt später nach.
 - AleCast speichert wie Frigate: `/recordings/JJJJ-MM-TT/HH/<kamera>/MM.SS.mp4` und löscht nach `RETAIN_DAYS` Tagen.
-- Ansehen: **▶ Aufnahmen** in der AleCast-Web-UI (`/recordings`) – Kamera, Tag, Zeitleiste, Segmente laufen nahtlos hintereinander.
+- Ansehen: **Verlauf** (wie bei Frigate) – in AleCorder über **◷ Verlauf ansehen** oder im Browser unter `/recordings`:
+  - Video groß, daneben **Zeitstrahl** (neueste Zeit oben, zoombar), blaue Balken = Aufnahme, orange = **Bewegung im Bild**
+  - Zeitstrahl antippen = zu dieser Uhrzeit springen, Maus darüber = **Vorschaubild**
+  - Segmente laufen **nahtlos** hintereinander, Lücken werden übersprungen, 1×–16× Geschwindigkeit
+  - **● Jetzt** springt zur neuesten Aufnahme und läuft mit; Tage per ◀ ▶ wechseln; Uhrzeit direkt eingeben
+  - Tasten: Leertaste, ←/→ (10 s), Umschalt+←/→ (1 min)
+  - Vorschaubilder und Bewegungswerte erzeugt AleCast nach jedem Upload im Hintergrund (auch für ältere Aufnahmen)
 
 ### Übertragung per USB-Kabel (spart Netz-Traffic)
 

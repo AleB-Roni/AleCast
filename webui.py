@@ -323,8 +323,8 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/settings":
             cur = load_settings()
             self._json({**cur, "effective": effective(cur)})
-        elif path == "/recordings":
-            self._send(200, recorder.REC_PAGE.encode(), "text/html; charset=utf-8")
+        elif path in ("/recordings", "/history"):
+            self._send(200, recorder.rec_page().encode(), "text/html; charset=utf-8")
         elif path == "/api/recordings":
             q = parse_qs(urlparse(self.path).query)
             try:
@@ -480,7 +480,7 @@ button.on{background:var(--accent);color:#1a1006;border-color:var(--accent)}
 <body>
 <header>
   <h1><b>Ale</b>Cast</h1>
-  <a href="recordings" class="pill" style="text-decoration:none;color:var(--accent)">▶ Aufnahmen</a>
+  <a href="recordings" class="pill" style="text-decoration:none;color:var(--accent)">▶ Verlauf</a>
   <span class="pill"><span class="dot" id="dDev"></span><span id="tDev">Handy …</span></span>
   <span class="pill"><span class="dot" id="dStr"></span><span id="tStr">Stream …</span></span>
   <label class="sw"><input type="checkbox" id="live" checked> Live-Bild</label>
@@ -765,4 +765,5 @@ if __name__ == "__main__":
     print(f"[AleCast] Web-UI auf Port {PORT}" + (" (mit Passwort)" if PASSWORD else ""), flush=True)
     recorder.retain_days_provider = lambda: effective(load_settings())["retain_days"]
     recorder.start_cleanup_thread()
+    recorder.start_analysis_thread()
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

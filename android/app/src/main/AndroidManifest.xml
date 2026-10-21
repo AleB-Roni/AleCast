@@ -34,6 +34,12 @@
             android:label="Ausschnitt wählen" />
 
         <activity
+            android:name=".HistoryActivity"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize"
+            android:exported="false"
+            android:label="Verlauf" />
+
+        <activity
             android:name=".TapActivity"
             android:exported="false"
             android:label="Tipp-Punkte" />

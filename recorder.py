@@ -4,7 +4,9 @@ import datetime as dt
 import json
 import os
 import re
+import queue
 import shutil
+import subprocess
 import threading
 import time
 
@@ -23,6 +25,8 @@ def retain_days():
     return RETAIN_DAYS
 MAX_UPLOAD = 1024 * 1024 * 1024  # 1 GB pro Segment
 INDEX = "segments.jsonl"
+MOTION = "motion.jsonl"
+MOTION_BUCKET_MS = 5000
 _index_lock = threading.Lock()
 _cam_re = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 _date_re = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -60,13 +64,14 @@ def store_segment(rfile, length, camera, start_ms, dur_ms):
     with _index_lock:
         with open(os.path.join(folder, INDEX), "a") as f:
             f.write(json.dumps({"file": name, "start": start_ms, "dur": dur_ms}) + "\n")
+    _jobs.put((folder, name))
     return os.path.relpath(target, RECORDINGS_DIR)
 
 
-def _read_index(folder):
+def _read_index(folder, fname=INDEX):
     entries = {}
     try:
-        with open(os.path.join(folder, INDEX)) as f:
+        with open(os.path.join(folder, fname)) as f:
             for line in f:
                 try:
                     e = json.loads(line)
@@ -118,6 +123,7 @@ def list_segments(camera, date):
         if not os.path.isdir(folder):
             continue
         idx = _read_index(folder)
+        motion = _read_index(folder, MOTION)
         for name in sorted(os.listdir(folder)):
             if not name.endswith(".mp4"):
                 continue
@@ -128,8 +134,12 @@ def list_segments(camera, date):
                 mm, ss = name[:-4].split(".")
                 start = int(dt.datetime.strptime(f"{date} {h}:{mm}:{ss}", "%Y-%m-%d %H:%M:%S").timestamp() * 1000)
                 dur = 60000
-            out.append({"url": f"rec/{date}/{h}/{camera}/{name}", "start": start, "dur": dur,
-                        "size": os.path.getsize(os.path.join(folder, name))})
+            base_url = f"rec/{date}/{h}/{camera}/{name}"
+            m = motion.get(name)
+            out.append({"url": base_url, "start": start, "dur": dur,
+                        "size": os.path.getsize(os.path.join(folder, name)),
+                        "thumb": base_url[:-4] + ".jpg" if os.path.isfile(os.path.join(folder, name[:-4] + ".jpg")) else None,
+                        "motion": m["m"] if m else None, "mb": m.get("bucket", MOTION_BUCKET_MS) if m else MOTION_BUCKET_MS})
     out.sort(key=lambda s: s["start"])
     return out
 
@@ -138,7 +148,7 @@ def resolve_file(rel):
     """Pfad unter RECORDINGS_DIR auflösen (ohne Ausbruch aus dem Ordner)."""
     base = os.path.realpath(RECORDINGS_DIR)
     full = os.path.realpath(os.path.join(base, rel))
-    if not full.startswith(base + os.sep) or not full.endswith(".mp4") or not os.path.isfile(full):
+    if not full.startswith(base + os.sep) or not full.endswith((".mp4", ".jpg")) or not os.path.isfile(full):
         return None
     return full
 
@@ -165,106 +175,87 @@ def start_cleanup_thread():
     threading.Thread(target=loop, daemon=True).start()
 
 
-REC_PAGE = r"""<!doctype html>
-<html lang="de">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AleCast Aufnahmen</title>
-<style>
-:root{--bg:#111315;--panel:#1a1d20;--line:#2a2e33;--text:#e6e8ea;--muted:#8b9299;--accent:#ff8a3d;--rec:#3a7bd5}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-header{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-h1{font-size:17px;margin:0}h1 b{color:var(--accent)}
-a{color:var(--accent);text-decoration:none}
-select,button{background:#23272b;color:var(--text);border:1px solid var(--line);border-radius:7px;padding:7px 10px;font:inherit;cursor:pointer}
-button:hover{border-color:var(--accent)}
-main{max-width:1200px;margin:0 auto;padding:16px;display:flex;flex-direction:column;gap:14px}
-video{width:100%;aspect-ratio:16/9;max-height:65vh;background:#000;border:1px solid var(--line);border-radius:10px}
-.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.muted{color:var(--muted);font-size:12px}
-.tl{position:relative;height:46px;background:var(--panel);border:1px solid var(--line);border-radius:8px;cursor:pointer;overflow:hidden}
-.tl .seg{position:absolute;top:8px;bottom:18px;background:var(--rec);opacity:.85}
-.tl .seg.cur{background:var(--accent);opacity:1}
-.tl .tick{position:absolute;bottom:2px;font-size:10px;color:var(--muted);transform:translateX(-50%)}
-.tl .line{position:absolute;top:0;bottom:14px;width:1px;background:var(--line)}
-.tl .pos{position:absolute;top:0;bottom:0;width:2px;background:#fff}
-.time{font-variant-numeric:tabular-nums;font-size:20px;font-weight:600}
-.empty{padding:40px;text-align:center;color:var(--muted);background:var(--panel);border:1px dashed var(--line);border-radius:10px}
-</style>
-</head>
-<body>
-<header>
-  <h1><b>Ale</b>Cast · Aufnahmen</h1>
-  <select id="cam"></select>
-  <select id="day"></select>
-  <span class="muted" id="disk"></span>
-  <a href="./" style="margin-left:auto">← Steuerung</a>
-</header>
-<main>
-  <div id="empty" class="empty" style="display:none">Noch keine Aufnahmen. Sobald AleCorder Segmente hochlädt, erscheinen sie hier.</div>
-  <video id="v" controls playsinline muted></video>
-  <div class="bar">
-    <span class="time" id="clock">--:--:--</span>
-    <button id="prev">◀ Segment</button>
-    <button id="next">Segment ▶</button>
-    <select id="speed"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select>
-    <a id="dl" href="#" download>Segment herunterladen</a>
-    <span class="muted" id="info" style="margin-left:auto"></span>
-  </div>
-  <div class="tl" id="tl"></div>
-  <div class="muted">Auf die Zeitleiste klicken, um zu einer Uhrzeit zu springen. Blau = aufgenommen.</div>
-</main>
-<script>
-const $=id=>document.getElementById(id), v=$("v");
-let segs=[], cur=-1, dayStart=0;
-const pad=n=>String(n).padStart(2,"0");
-const fmt=ms=>{const d=new Date(ms);return pad(d.getHours())+":"+pad(d.getMinutes())+":"+pad(d.getSeconds())};
-async function j(u){const r=await fetch(u);if(!r.ok)throw new Error(await r.text());return r.json()}
-async function init(){
-  const o=await j("api/recordings");
-  $("disk").innerHTML=`Aufbewahrung ${o.retain_days>0?o.retain_days+" Tage":"unbegrenzt"} (<a href="./#settings">ändern</a>) · ${o.disk_free_gb} GB frei`;
-  if(!o.cameras.length){$("empty").style.display="block";return}
-  $("cam").innerHTML=o.cameras.map(c=>`<option>${c}</option>`).join("");
-  $("day").innerHTML=o.days.map(d=>`<option>${d}</option>`).join("");
-  loadDay();
-}
-async function loadDay(){
-  segs=await j(`api/recordings?camera=${encodeURIComponent($("cam").value)}&date=${$("day").value}`);
-  const [y,m,d]=$("day").value.split("-").map(Number); dayStart=new Date(y,m-1,d).getTime();
-  drawTl(); cur=-1;
-  if(segs.length) play(segs.length-1,0);
-  $("info").textContent=segs.length+" Segmente";
-}
-function drawTl(){
-  const tl=$("tl"), day=86400000; let h="";
-  for(let i=0;i<=24;i+=3){const x=i/24*100;h+=`<div class="line" style="left:${x}%"></div><div class="tick" style="left:${Math.min(97,Math.max(2,x))}%">${pad(i)}:00</div>`}
-  segs.forEach((s,i)=>{const l=(s.start-dayStart)/day*100,w=Math.max(.08,s.dur/day*100);h+=`<div class="seg" data-i="${i}" style="left:${l}%;width:${w}%"></div>`});
-  h+=`<div class="pos" id="pos" style="display:none"></div>`; tl.innerHTML=h;
-}
-function play(i,offset){
-  if(i<0||i>=segs.length)return; cur=i; const s=segs[i];
-  v.src=s.url; $("dl").href=s.url;
-  v.onloadedmetadata=()=>{v.currentTime=Math.min(offset||0,Math.max(0,v.duration-0.5));v.playbackRate=+$("speed").value;v.play().catch(()=>{})};
-  document.querySelectorAll(".seg").forEach(e=>e.classList.toggle("cur",+e.dataset.i===i));
-}
-v.addEventListener("ended",()=>{if(cur+1<segs.length)play(cur+1,0)});
-v.addEventListener("timeupdate",()=>{
-  if(cur<0)return; const t=segs[cur].start+v.currentTime*1000; $("clock").textContent=fmt(t);
-  const p=$("pos"); p.style.display="block"; p.style.left=((t-dayStart)/86400000*100)+"%";
-});
-$("tl").addEventListener("click",e=>{
-  const b=$("tl").getBoundingClientRect(), t=dayStart+(e.clientX-b.left)/b.width*86400000;
-  let best=-1,bd=Infinity;
-  segs.forEach((s,i)=>{if(t>=s.start&&t<=s.start+s.dur){best=i;bd=0}else{const d=Math.min(Math.abs(t-s.start),Math.abs(t-s.start-s.dur));if(bd>0&&d<bd){bd=d;best=i}}});
-  if(best>=0)play(best,Math.max(0,(t-segs[best].start)/1000));
-});
-$("prev").onclick=()=>play(cur-1,0); $("next").onclick=()=>play(cur+1,0);
-$("speed").onchange=()=>v.playbackRate=+$("speed").value;
-$("cam").onchange=loadDay; $("day").onchange=loadDay;
-init().catch(e=>{$("empty").textContent="Fehler: "+e.message;$("empty").style.display="block"});
-</script>
-</body>
-</html>
-"""
+
+# ---------- Vorschaubilder & Bewegungsanalyse (Hintergrund) ----------
+_jobs = queue.Queue()
+_score_re = re.compile(r"lavfi\.scene_score=([0-9.]+)")
+_pts_re = re.compile(r"pts_time:([0-9.]+)")
+
+
+def analyze(folder, name):
+    """Erzeugt Vorschaubild (MM.SS.jpg) und Bewegungswerte je 5 s (motion.jsonl)."""
+    src = os.path.join(folder, name)
+    thumb = os.path.join(folder, name[:-4] + ".jpg")
+    if not os.path.isfile(src):
+        return
+    if not os.path.isfile(thumb):
+        subprocess.run(["nice", "-n", "10", "ffmpeg", "-v", "error", "-y", "-ss", "0.5", "-i", src,
+                        "-frames:v", "1", "-vf", "scale=320:-2", "-q:v", "6", thumb],
+                       capture_output=True, timeout=60)
+    if name in _read_index(folder, MOTION):
+        return
+    try:
+        out = subprocess.run(
+            ["nice", "-n", "10", "ffmpeg", "-v", "error", "-i", src, "-an", "-vf",
+             "fps=5,scale=128:-2,select='gte(scene\\,0)',metadata=print:key=lavfi.scene_score:file=-",
+             "-f", "null", "-"],
+            capture_output=True, timeout=300, text=True).stdout
+    except subprocess.TimeoutExpired:
+        return
+    buckets = {}
+    t = 0.0
+    for line in out.splitlines():
+        m = _pts_re.search(line)
+        if m:
+            t = float(m.group(1))
+            continue
+        m = _score_re.search(line)
+        if m and t > 0:  # erstes Bild hat keinen Vergleich
+            b = int(t * 1000 // MOTION_BUCKET_MS)
+            buckets[b] = max(buckets.get(b, 0.0), float(m.group(1)))
+    n = (max(buckets) + 1) if buckets else 0
+    values = [round(buckets.get(i, 0.0), 4) for i in range(n)]
+    with _index_lock:
+        with open(os.path.join(folder, MOTION), "a") as f:
+            f.write(json.dumps({"file": name, "bucket": MOTION_BUCKET_MS, "m": values}) + "\n")
+
+
+def _backfill():
+    """Ältere Segmente ohne Vorschau/Bewegung nachträglich analysieren (neueste zuerst)."""
+    try:
+        for d in sorted(os.listdir(RECORDINGS_DIR), reverse=True):
+            if not _date_re.match(d):
+                continue
+            for h in sorted(os.listdir(os.path.join(RECORDINGS_DIR, d)), reverse=True):
+                hp = os.path.join(RECORDINGS_DIR, d, h)
+                if not os.path.isdir(hp):
+                    continue
+                for c in os.listdir(hp):
+                    folder = os.path.join(hp, c)
+                    if not os.path.isdir(folder):
+                        continue
+                    done = _read_index(folder, MOTION)
+                    for name in sorted(os.listdir(folder), reverse=True):
+                        if name.endswith(".mp4") and (name not in done or not os.path.isfile(os.path.join(folder, name[:-4] + ".jpg"))):
+                            _jobs.put((folder, name))
+    except OSError:
+        pass
+
+
+def start_analysis_thread():
+    def worker():
+        while True:
+            folder, name = _jobs.get()
+            try:
+                analyze(folder, name)
+            except Exception as e:  # noqa: BLE001 – Analyse darf den Server nie stoppen
+                print(f"[AleCast] Analyse {name} fehlgeschlagen: {e}", flush=True)
+    threading.Thread(target=worker, daemon=True).start()
+    threading.Thread(target=_backfill, daemon=True).start()
+
+_page_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "history.html")
+
+
+def rec_page():
+    with open(_page_path, encoding="utf-8") as f:
+        return f.read()
