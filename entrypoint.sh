@@ -16,9 +16,9 @@ log() {
   fi
 }
 
-if [ -z "${RTSP_URL}" ]; then
-  log "FEHLER: RTSP_URL ist nicht gesetzt (z. B. rtsp://192.168.1.10:8554/tapo_app)"
-  exit 1
+STREAMING=1
+if [ -z "${RTSP_URL:-}" ]; then
+  STREAMING=0
 fi
 
 [ -n "${ADB_SERIAL}" ] && export ANDROID_SERIAL="${ADB_SERIAL}"
@@ -36,6 +36,7 @@ cleanup() {
   [ -n "${TAP_PID}" ] && kill "${TAP_PID}" 2>/dev/null
   [ -n "${CENTER_PID}" ] && kill "${CENTER_PID}" 2>/dev/null
   [ -n "${WEBUI_PID:-}" ] && kill "${WEBUI_PID}" 2>/dev/null
+  [ -n "${WATCHDOG_PID:-}" ] && kill "${WATCHDOG_PID}" 2>/dev/null
   [ -n "${SERVER_PID}" ] && kill "${SERVER_PID}" 2>/dev/null
   adb shell pkill -f com.genymobile.scrcpy >/dev/null 2>&1
   adb forward --remove-all >/dev/null 2>&1
@@ -63,6 +64,43 @@ prepare_device() {
     adb shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1
   fi
   adb push /opt/scrcpy-server.jar "${SERVER_JAR}" >/dev/null || return 1
+}
+
+# ---------- AleCorder (Aufnahme-App auf dem Handy) ----------
+ALECORDER_PKG=de.aleb.alecorder
+
+alecorder_installed() {
+  adb shell pm list packages "${ALECORDER_PKG}" 2>/dev/null | tr -d '\r' | grep -qx "package:${ALECORDER_PKG}"
+}
+
+# Bildschirmaufnahme ohne Rückfrage erlauben, Hintergrundstart und Akku-Ausnahme
+alecorder_permissions() {
+  adb shell appops set "${ALECORDER_PKG}" PROJECT_MEDIA allow >/dev/null 2>&1
+  adb shell appops set "${ALECORDER_PKG}" SYSTEM_ALERT_WINDOW allow >/dev/null 2>&1
+  adb shell dumpsys deviceidle whitelist "+${ALECORDER_PKG}" >/dev/null 2>&1
+}
+
+# Startet AleCorder neu, wenn er aufnehmen soll, aber nicht läuft (z. B. nach Neustart oder Absturz)
+alecorder_watchdog() {
+  [ "${ALECORDER_WATCHDOG:-1}" = "1" ] || return
+  local announced=0
+  while true; do
+    sleep 60
+    [ "$(adb get-state 2>/dev/null)" = "device" ] || continue
+    alecorder_installed || continue
+    if [ "${announced}" = "0" ]; then
+      log "AleCorder gefunden – Aufnahme-Erlaubnis gesetzt, Watchdog aktiv"
+      announced=1
+    fi
+    alecorder_permissions
+    want="$(adb shell cat "/sdcard/Android/data/${ALECORDER_PKG}/files/should_run" 2>/dev/null | tr -d '\r')"
+    [ "${want}" = "1" ] || continue
+    if ! adb shell dumpsys activity services "${ALECORDER_PKG}" 2>/dev/null | grep -q "RecorderService"; then
+      log "AleCorder läuft nicht – starte Aufnahme neu"
+      adb shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1
+      adb shell am start -n "${ALECORDER_PKG}/.ProjectionRequestActivity" --ez auto true >/dev/null 2>&1
+    fi
+  done
 }
 
 # Tippt den "Weiterschauen"-Dialog der Tapo-App automatisch weg
@@ -157,7 +195,12 @@ run_ffmpeg() {
   ffmpeg "${in_args[@]}" -an "${out_args[@]}" -rtsp_transport tcp -f rtsp "${RTSP_URL}"
 }
 
-log "Start – Ziel: ${RTSP_URL}"
+if [ "${STREAMING}" = "1" ]; then
+  log "Start – Ziel: ${RTSP_URL}"
+else
+  log "Start ohne RTSP-Streaming (nur Web-UI, Aufnahme-Server und Auto-Tap)"
+fi
+mkdir -p "${RECORDINGS_DIR:-/recordings}" 2>/dev/null
 
 WEBUI_PID=""
 if [ "${WEBUI_ENABLED:-1}" = "1" ]; then
@@ -180,6 +223,19 @@ while true; do
   if [ -z "${CENTER_PID}" ] || ! kill -0 "${CENTER_PID}" 2>/dev/null; then
     center_tap_loop &
     CENTER_PID=$!
+  fi
+
+  if alecorder_installed; then alecorder_permissions; fi
+  if [ -z "${WATCHDOG_PID:-}" ] || ! kill -0 "${WATCHDOG_PID}" 2>/dev/null; then
+    alecorder_watchdog &
+    WATCHDOG_PID=$!
+  fi
+
+  if [ "${STREAMING}" = "0" ]; then
+    # Kein Streaming: nur warten, solange das Handy verbunden ist
+    while [ "$(adb get-state 2>/dev/null)" = "device" ]; do sleep 10; done
+    log "Handy getrennt"
+    continue
   fi
 
   start_server || { log "adb forward fehlgeschlagen"; sleep 5; continue; }

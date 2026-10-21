@@ -4,8 +4,14 @@ import base64
 import json
 import os
 import subprocess
+import re
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, unquote, urlparse
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import recorder  # noqa: E402
 
 PORT = int(os.environ.get("WEBUI_PORT", "8080"))
 PASSWORD = os.environ.get("WEBUI_PASSWORD", "")
@@ -280,11 +286,79 @@ class Handler(BaseHTTPRequestHandler):
             self._json(status())
         elif path == "/api/settings":
             self._json(load_settings())
+        elif path == "/recordings":
+            self._send(200, recorder.REC_PAGE.encode(), "text/html; charset=utf-8")
+        elif path == "/api/recordings":
+            q = parse_qs(urlparse(self.path).query)
+            try:
+                if "camera" in q and "date" in q:
+                    self._json(recorder.list_segments(q["camera"][0], q["date"][0]))
+                else:
+                    self._json(recorder.list_overview())
+            except (ValueError, OSError) as e:
+                self._send(400, str(e).encode(), "text/plain; charset=utf-8")
+        elif path.startswith("/rec/"):
+            self._send_file(unquote(path[len("/rec/"):]))
         else:
             self._send(404, b"nicht gefunden", "text/plain")
 
+    def _send_file(self, rel):
+        full = recorder.resolve_file(rel)
+        if not full:
+            self._send(404, b"nicht gefunden", "text/plain")
+            return
+        size = os.path.getsize(full)
+        start, end = 0, size - 1
+        rng = self.headers.get("Range", "")
+        m = re.match(r"bytes=(\d*)-(\d*)$", rng.strip())
+        partial = bool(m) and (m.group(1) or m.group(2))
+        if partial:
+            if m.group(1):
+                start = int(m.group(1))
+                if m.group(2):
+                    end = min(int(m.group(2)), size - 1)
+            else:
+                start = max(0, size - int(m.group(2)))
+            if start > end or start >= size:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.end_headers()
+                return
+        self.send_response(206 if partial else 200)
+        self.send_header("Content-Type", "video/mp4")
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(end - start + 1))
+        if partial:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.end_headers()
+        try:
+            with open(full, "rb") as f:
+                f.seek(start)
+                remaining = end - start + 1
+                while remaining > 0:
+                    chunk = f.read(min(512 * 1024, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def _upload(self):
+        q = parse_qs(urlparse(self.path).query)
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            rel = recorder.store_segment(self.rfile, length, q.get("camera", [""])[0],
+                                         q.get("start", ["0"])[0], q.get("duration", ["0"])[0])
+            self._json({"ok": True, "file": rel})
+        except (ValueError, OSError) as e:
+            self._json({"ok": False, "msg": str(e)}, 400)
+
     def do_POST(self):
         if not self._auth_ok():
+            return
+        if self.path.startswith("/api/upload"):
+            self._upload()
             return
         if self.path not in ("/api/action", "/api/settings"):
             self._send(404, b"nicht gefunden", "text/plain")
@@ -360,6 +434,7 @@ button.on{background:var(--accent);color:#1a1006;border-color:var(--accent)}
 <body>
 <header>
   <h1><b>Ale</b>Cast</h1>
+  <a href="recordings" class="pill" style="text-decoration:none;color:var(--accent)">▶ Aufnahmen</a>
   <span class="pill"><span class="dot" id="dDev"></span><span id="tDev">Handy …</span></span>
   <span class="pill"><span class="dot" id="dStr"></span><span id="tStr">Stream …</span></span>
   <label class="sw"><input type="checkbox" id="live" checked> Live-Bild</label>
@@ -607,4 +682,5 @@ if __name__ == "__main__":
             print(cur["source_size"] or "")
         sys.exit(0)
     print(f"[AleCast] Web-UI auf Port {PORT}" + (" (mit Passwort)" if PASSWORD else ""), flush=True)
+    recorder.start_cleanup_thread()
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

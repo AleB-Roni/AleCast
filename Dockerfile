@@ -4,7 +4,7 @@ FROM debian:bookworm-slim
 ARG SCRCPY_VERSION=4.0
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends adb ffmpeg ca-certificates curl procps python3 \
+ && apt-get install -y --no-install-recommends adb ffmpeg ca-certificates curl procps python3 tzdata \
  && rm -rf /var/lib/apt/lists/*
 
 # Offizieller scrcpy-Server (läuft auf dem Handy, liefert rohen H.264-Stream)
@@ -25,12 +25,14 @@ ENV SCRCPY_VERSION=${SCRCPY_VERSION} \
     KEEP_AWAKE=1 \
     WEBUI_ENABLED=1 \
     WEBUI_PORT=8080 \
-    WEBUI_PASSWORD=""
+    WEBUI_PASSWORD="" \
+    RECORDINGS_DIR=/recordings \
+    RETAIN_DAYS=5
 
 EXPOSE 8080
 
 COPY entrypoint.sh /entrypoint.sh
-COPY webui.py /opt/alecast/webui.py
+COPY webui.py recorder.py /opt/alecast/
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

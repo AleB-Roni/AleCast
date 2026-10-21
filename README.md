@@ -1,5 +1,7 @@
 # AleCast
 
+> **Neu: AleCorder** – Android-App, die den Bildschirm direkt auf dem Handy aufnimmt (frei wählbarer Ausschnitt) und die Segmente an AleCast schickt. AleCast speichert sie wie Frigate und zeigt sie auf einer Zeitleiste unter `/recordings`. Siehe Abschnitt [AleCorder](#alecorder).
+
 Streamt den Bildschirm eines per USB angeschlossenen Android-Handys als RTSP-Stream – gedacht als Notlösung, um die Tapo-App-Live-Ansicht in Frigate aufzunehmen.
 
 ```
@@ -136,3 +138,34 @@ Den angezeigten Text des Buttons als `TAP_TEXT` setzen.
 - **Schwarzes Bild**: Display aus oder gesperrt → Displaysperre deaktivieren, „Aktiviert lassen“ einschalten.
 - **Frigate meldet keine Frames**: `TRANSCODE=1` lassen; prüfen, ob in Frigate unter go2rtc der Stream `tapo_app` aktiv ist.
 - **Nach Handy-Update keine Verbindung**: USB-Debugging-Freigabe erneut bestätigen.
+
+
+## AleCorder
+
+Android-App im Ordner `android/`. Jede Änderung baut automatisch eine neue APK – zu finden unter **Releases** in diesem Repo (`AleCorder-1.0.X.apk`).
+
+### Einrichten
+
+1. APK auf dem Handy aus den **Releases** herunterladen und installieren (Installation aus unbekannten Quellen erlauben).
+2. In AleCast den Pfad **Aufnahmen** (`/recordings`) auf einen Share legen, z. B. `/mnt/user/Media/alecast`, und den Container aktualisieren.
+3. In AleCorder: **Adresse** = Web-UI von AleCast (z. B. `http://192.168.178.108:8086`), ggf. Passwort, **Kameraname** (z. B. `tapo`) → **Verbindung testen**.
+4. **▶ Start** → Bildschirmaufnahme erlauben → zur Tapo-App wechseln.
+5. Optional **▭ Ausschnitt wählen**: Rahmen auf dem letzten Bildschirmfoto aufziehen → **Übernehmen** (wirkt sofort).
+
+### Wie es arbeitet
+
+- Aufnahme per MediaProjection, Ausschnitt/Skalierung per OpenGL, H.264-Hardware-Encoder, feste Bildrate.
+- Segmente (Standard 60 s) werden der Reihe nach per HTTP an `POST /api/upload` geschickt. Ist der Server weg, puffert die App lokal (Standard bis 2 GB) und lädt später nach.
+- AleCast speichert wie Frigate: `/recordings/JJJJ-MM-TT/HH/<kamera>/MM.SS.mp4` und löscht nach `RETAIN_DAYS` Tagen.
+- Ansehen: **▶ Aufnahmen** in der AleCast-Web-UI (`/recordings`) – Kamera, Tag, Zeitleiste, Segmente laufen nahtlos hintereinander.
+
+### Dauerbetrieb mit AleCast per USB
+
+Ist das Handy per USB an AleCast angeschlossen, setzt AleCast automatisch:
+- `appops PROJECT_MEDIA allow` → keine Rückfrage bei der Bildschirmaufnahme,
+- „Über anderen Apps einblenden“ und Akku-Ausnahme,
+- einen **Watchdog**, der AleCorder nach Neustart/Absturz wieder startet (nur wenn vorher aufgenommen wurde; **Stopp** in der App wird respektiert).
+
+RTSP-Streaming ist jetzt optional: `RTSP_URL` leer lassen, wenn nur AleCorder aufnehmen soll – dann läuft das Handy-Encoder-Budget komplett für AleCorder.
+
+> Hinweis: Der Signaturschlüssel der APK liegt bewusst im Repo (`android/keystore`), damit jedes Update über die alte Version installiert werden kann.
