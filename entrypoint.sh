@@ -16,10 +16,14 @@ SERVER_JAR=/data/local/tmp/alecast-scrcpy-server.jar
 LOCAL_PORT=27183
 SERVER_PID=""
 TAP_PID=""
+CENTER_PID=""
+CENTER_X="${CENTER_X:-}"
+CENTER_Y="${CENTER_Y:-}"
 
 cleanup() {
   log "Beende ..."
   [ -n "${TAP_PID}" ] && kill "${TAP_PID}" 2>/dev/null
+  [ -n "${CENTER_PID}" ] && kill "${CENTER_PID}" 2>/dev/null
   [ -n "${SERVER_PID}" ] && kill "${SERVER_PID}" 2>/dev/null
   adb shell pkill -f com.genymobile.scrcpy >/dev/null 2>&1
   adb forward --remove-all >/dev/null 2>&1
@@ -69,6 +73,40 @@ autotap_loop() {
   done
 }
 
+# Bildschirmmitte ermitteln (aktuelle Ausrichtung, z. B. Querformat)
+screen_center() {
+  local xml bounds w h size
+  xml="$(adb exec-out uiautomator dump /dev/tty 2>/dev/null)"
+  bounds="$(printf '%s' "${xml}" | grep -oE 'bounds="\[0,0\]\[[0-9]+,[0-9]+\]"' | head -n1 \
+    | sed -nE 's/.*\]\[([0-9]+),([0-9]+)\].*/\1 \2/p')"
+  if [ -n "${bounds}" ]; then
+    read -r w h <<< "${bounds}"
+  else
+    size="$(adb shell wm size | tr -d '\r' | grep -oE '[0-9]+x[0-9]+' | tail -n1)"
+    w="${size%x*}"; h="${size#*x}"
+    [ -z "${w}" ] && return 1
+  fi
+  echo "$(( w / 2 )) $(( h / 2 ))"
+}
+
+# Tippt regelmäßig in die Bildschirmmitte (z. B. "Aktualisieren" bei hängendem Feed)
+center_tap_loop() {
+  [ "${CENTER_TAP_INTERVAL:-0}" -gt 0 ] 2>/dev/null || return
+  log "Mitte-Tippen aktiv (alle ${CENTER_TAP_INTERVAL}s)"
+  while true; do
+    sleep "${CENTER_TAP_INTERVAL}"
+    local c x y
+    if [ -n "${CENTER_X}" ] && [ -n "${CENTER_Y}" ]; then
+      x="${CENTER_X}"; y="${CENTER_Y}"
+    else
+      c="$(screen_center)" || { log "Mitte-Tippen: Bildschirmgröße unbekannt"; continue; }
+      read -r x y <<< "${c}"
+    fi
+    adb shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1
+    adb shell input tap "${x}" "${y}" >/dev/null 2>&1 && log "Mitte-Tippen auf ${x},${y}"
+  done
+}
+
 start_server() {
   adb shell pkill -f com.genymobile.scrcpy >/dev/null 2>&1
   adb forward --remove-all >/dev/null 2>&1
@@ -106,6 +144,11 @@ while true; do
   if [ -z "${TAP_PID}" ] || ! kill -0 "${TAP_PID}" 2>/dev/null; then
     autotap_loop &
     TAP_PID=$!
+  fi
+
+  if [ -z "${CENTER_PID}" ] || ! kill -0 "${CENTER_PID}" 2>/dev/null; then
+    center_tap_loop &
+    CENTER_PID=$!
   fi
 
   start_server || { log "adb forward fehlgeschlagen"; sleep 5; continue; }

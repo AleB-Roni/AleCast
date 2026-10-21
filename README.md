@@ -9,6 +9,7 @@ Handy (Tapo-App) --USB--> scrcpy-Server (H.264) --> ffmpeg --> RTSP-Push --> go2
 - Nutzt den offiziellen scrcpy-Server (v4.0) im Rohstrom-Modus: kein Zeitlimit wie bei `screenrecord`.
 - Startet bei Abbruch oder Ab-/Anstecken automatisch neu.
 - Tippt den „Weiterschauen“-Dialog der Tapo-App automatisch weg (Auto-Tap).
+- Tippt alle 10 Minuten in die Bildschirmmitte, falls der Feed hängt und „Aktualisieren“ braucht.
 - Hält das Display wach, solange das Handy per USB verbunden ist.
 
 ## 1. Handy vorbereiten
@@ -91,6 +92,8 @@ docker logs -f alecast
 | `OUT_FPS` | `10` | Feste Ausgabe-Bildrate bei `TRANSCODE=1` |
 | `TAP_TEXT` | `Weiter ansehen\|Weiterschauen\|…` | Exakter Button-Text des Dialogs (Regex, mehrere mit `\|`) – leer = Auto-Tap aus |
 | `TAP_INTERVAL` | `15` | Sekunden zwischen Dialog-Prüfungen |
+| `CENTER_TAP_INTERVAL` | `600` | Tippt alle X Sekunden in die Bildschirmmitte (z. B. „Aktualisieren“ bei hängendem Feed), `0` = aus |
+| `CENTER_X` / `CENTER_Y` | leer | Feste Tipp-Position statt automatisch ermittelter Mitte |
 | `KEEP_AWAKE` | `1` | Display bei USB-Verbindung wach halten |
 
 ### Button-Text für Auto-Tap herausfinden

@@ -19,8 +19,9 @@ ENV SCRCPY_VERSION=${SCRCPY_VERSION} \
     VIDEO_BIT_RATE=4000000 \
     TRANSCODE=1 \
     OUT_FPS=10 \
-    TAP_TEXT="Weiter ansehen|Weiterschauen|Weiter schauen|Continue watching|Continue" \
+    TAP_TEXT="Weiter ansehen|Weiterschauen|Weiter schauen|Continue watching|Continue|Aktualisieren|Erneut versuchen|Neu laden|Refresh|Retry" \
     TAP_INTERVAL=15 \
+    CENTER_TAP_INTERVAL=600 \
     KEEP_AWAKE=1
 
 COPY entrypoint.sh /entrypoint.sh
