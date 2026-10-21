@@ -56,6 +56,10 @@ class CaptureEngine(
     private var aTex = 0
     private var uTexMatrix = 0
     private var uCrop = 0
+    private var uRot = 0
+    private var paused = false
+    private var encBaseW = 0
+    private var encBaseH = 0
     private val quadPos: FloatBuffer = floatBuffer(floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f))
     private val quadTex: FloatBuffer = floatBuffer(floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f))
 
@@ -98,7 +102,45 @@ class CaptureEngine(
         surfaceTexture?.setDefaultBufferSize(width, height)
         hasFrame = false
         RecorderState.captureSize = "${width}×$height"
-        rebuildEncoder()
+        val s = settings ?: return@post
+        val (bw, bh) = baseDims(s)
+        if (encoder != null && bw == encBaseW && bh == encBaseH) {
+            updatePause(s)  // gleiche Zielgröße: nur pausieren/fortsetzen, kein neuer Encoder
+        } else {
+            rebuildEncoder()
+        }
+    }
+
+    /** Bildgröße nach "Bild drehen" (so, wie es aufgenommen werden soll). */
+    private fun orientedDims(s: EncoderSettings): Pair<Int, Int> =
+        if (s.rotation % 180 == 0) capW to capH else capH to capW
+
+    /** Passt die aktuelle Ausrichtung zur eingestellten Aufnahme-Ausrichtung? */
+    private fun matchesLock(s: EncoderSettings): Boolean {
+        val (w, h) = orientedDims(s)
+        return when (s.orientation) {
+            Prefs.ORIENT_LANDSCAPE -> w >= h
+            Prefs.ORIENT_PORTRAIT -> h > w
+            else -> true
+        }
+    }
+
+    /** Bezugsgröße für Ausschnitt und Encoder – bei fester Ausrichtung immer in dieser Ausrichtung. */
+    private fun baseDims(s: EncoderSettings): Pair<Int, Int> {
+        val (w, h) = orientedDims(s)
+        return when (s.orientation) {
+            Prefs.ORIENT_LANDSCAPE -> max(w, h) to minOf(w, h)
+            Prefs.ORIENT_PORTRAIT -> minOf(w, h) to max(w, h)
+            else -> w to h
+        }
+    }
+
+    private fun updatePause(s: EncoderSettings) {
+        paused = !matchesLock(s)
+        RecorderState.status = if (paused) {
+            if (s.orientation == Prefs.ORIENT_LANDSCAPE) "Pausiert – Handy steht hochkant (Aufnahme nur im Querformat)"
+            else "Pausiert – Handy liegt quer (Aufnahme nur im Hochformat)"
+        } else "Nimmt auf"
     }
 
     fun release() {
@@ -138,8 +180,11 @@ class CaptureEngine(
         val s = settings ?: return
         releaseEncoder()
         val c = s.crop
-        val cropW = c.w * capW
-        val cropH = c.h * capH
+        val (bw, bh) = baseDims(s)
+        encBaseW = bw
+        encBaseH = bh
+        val cropW = c.w * bw
+        val cropH = c.h * bh
         val longest = max(cropW, cropH)
         val scale = if (s.maxOut > 0 && longest > s.maxOut) s.maxOut / longest else 1f
         val w = align16((cropW * scale).roundToInt())
@@ -151,7 +196,7 @@ class CaptureEngine(
             if (encSurface == EGL14.EGL_NO_SURFACE) throw IllegalStateException("eglCreateWindowSurface fehlgeschlagen")
             encoder = enc
             RecorderState.outputSize = "${w}×$h"
-            RecorderState.status = "Nimmt auf"
+            updatePause(s)
             startTicking()
         } catch (e: Exception) {
             Log.e(TAG, "encoder", e)
@@ -194,16 +239,16 @@ class CaptureEngine(
 
     private fun renderFrame() {
         val s = settings ?: return
-        if (!hasFrame || encSurface == EGL14.EGL_NO_SURFACE) return
+        if (paused || !hasFrame || encSurface == EGL14.EGL_NO_SURFACE) return
         val enc = encoder ?: return
         if (!EGL14.eglMakeCurrent(eglDisplay, encSurface, encSurface, eglContext)) return
         GLES20.glViewport(0, 0, enc.width, enc.height)
-        draw(s.crop)
+        draw(s.crop, s.rotation)
         EGLExt.eglPresentationTimeANDROID(eglDisplay, encSurface, System.nanoTime())
         EGL14.eglSwapBuffers(eglDisplay, encSurface)
     }
 
-    private fun draw(c: Crop) {
+    private fun draw(c: Crop, rotation: Int) {
         GLES20.glClearColor(0f, 0f, 0f, 1f)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
         GLES20.glUseProgram(program)
@@ -212,6 +257,8 @@ class CaptureEngine(
         GLES20.glUniformMatrix4fv(uTexMatrix, 1, false, stMatrix, 0)
         // Texturkoordinaten haben den Ursprung unten links, der Ausschnitt oben links.
         GLES20.glUniform4f(uCrop, c.x, 1f - c.y - c.h, c.w, c.h)
+        val rad = Math.toRadians(rotation.toDouble())
+        GLES20.glUniform2f(uRot, Math.cos(rad).toFloat(), Math.sin(rad).toFloat())
         GLES20.glEnableVertexAttribArray(aPos)
         GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 0, quadPos)
         GLES20.glEnableVertexAttribArray(aTex)
@@ -224,7 +271,7 @@ class CaptureEngine(
     /** Alle 3 s ein kleines Vorschaubild für den Ausschnitt-Editor (nur wenn AleCorder im Hintergrund ist). */
     private fun maybeSnapshot() {
         val now = SystemClock.uptimeMillis()
-        if (RecorderState.appVisible || !hasFrame || now - lastSnapshot < 3000) return
+        if (RecorderState.appVisible || paused || !hasFrame || now - lastSnapshot < 3000) return
         lastSnapshot = now
         try {
             RecorderState.lastSnapshot = snapshot()
@@ -235,8 +282,10 @@ class CaptureEngine(
     }
 
     private fun snapshot(): Bitmap {
-        val w = minOf(960, capW)
-        val h = max(1, (capH.toFloat() * w / capW).roundToInt())
+        val rot = settings?.rotation ?: 0
+        val (ow, oh) = if (rot % 180 == 0) capW to capH else capH to capW
+        val w = minOf(960, ow)
+        val h = max(1, (oh.toFloat() * w / ow).roundToInt())
         val tex = IntArray(1)
         val fbo = IntArray(1)
         GLES20.glGenTextures(1, tex, 0)
@@ -247,7 +296,7 @@ class CaptureEngine(
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[0])
         GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, tex[0], 0)
         GLES20.glViewport(0, 0, w, h)
-        draw(Crop.FULL)
+        draw(Crop.FULL, rot)
         val buf = ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.nativeOrder())
         GLES20.glReadPixels(0, 0, w, h, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
@@ -311,6 +360,7 @@ class CaptureEngine(
         aTex = GLES20.glGetAttribLocation(program, "aTexCoord")
         uTexMatrix = GLES20.glGetUniformLocation(program, "uTexMatrix")
         uCrop = GLES20.glGetUniformLocation(program, "uCrop")
+        uRot = GLES20.glGetUniformLocation(program, "uRot")
         android.opengl.Matrix.setIdentityM(stMatrix, 0)
     }
 
@@ -350,12 +400,15 @@ class CaptureEngine(
         private val VERTEX = """
             uniform mat4 uTexMatrix;
             uniform vec4 uCrop;
+            uniform vec2 uRot;
             attribute vec4 aPosition;
             attribute vec2 aTexCoord;
             varying vec2 vTex;
             void main() {
                 gl_Position = aPosition;
                 vec2 c = uCrop.xy + aTexCoord * uCrop.zw;
+                vec2 d = c - vec2(0.5);
+                c = vec2(d.x * uRot.x - d.y * uRot.y, d.x * uRot.y + d.y * uRot.x) + vec2(0.5);
                 vTex = (uTexMatrix * vec4(c, 0.0, 1.0)).xy;
             }
         """.trimIndent()

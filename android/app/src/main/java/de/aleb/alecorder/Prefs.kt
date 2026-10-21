@@ -23,6 +23,8 @@ data class Crop(val x: Float, val y: Float, val w: Float, val h: Float) {
 /** Einstellungen, die der Encoder braucht. */
 data class EncoderSettings(
     val crop: Crop,
+    val orientation: Int,
+    val rotation: Int,
     val fps: Int,
     val bitrate: Int,
     val maxOut: Int,
@@ -111,8 +113,20 @@ class Prefs(ctx: Context) {
         get() = TapPoint.fromJson(p.getString("tap_points", "[]")!!)
         set(v) = p.edit().putString("tap_points", TapPoint.toJson(v)).apply()
 
+    /** Aufnahme-Ausrichtung: 0 = Querformat (fest), 1 = Hochformat (fest), 2 = automatisch. */
+    var orientation: Int
+        get() = p.getInt("orientation", ORIENT_LANDSCAPE)
+        set(v) = p.edit().putInt("orientation", v.coerceIn(0, 2)).apply()
+
+    /** Korrektur, falls das Gerät den Bildinhalt gedreht liefert: 0, 90, 180 oder 270 Grad. */
+    var rotation: Int
+        get() = p.getInt("rotation", 0)
+        set(v) = p.edit().putInt("rotation", if (v in listOf(0, 90, 180, 270)) v else 0).apply()
+
     fun encoderSettings() = EncoderSettings(
         crop = crop,
+        orientation = orientation,
+        rotation = rotation,
         fps = fps,
         bitrate = bitrateKbps * 1000,
         maxOut = maxOut,
@@ -123,5 +137,8 @@ class Prefs(ctx: Context) {
         const val TRANSFER_AUTO = 0
         const val TRANSFER_USB = 1
         const val TRANSFER_NET = 2
+        const val ORIENT_LANDSCAPE = 0
+        const val ORIENT_PORTRAIT = 1
+        const val ORIENT_AUTO = 2
     }
 }

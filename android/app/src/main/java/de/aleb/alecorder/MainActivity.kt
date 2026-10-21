@@ -34,6 +34,8 @@ class MainActivity : Activity() {
     private lateinit var localMb: android.widget.EditText
     private lateinit var maxOut: Spinner
     private lateinit var transfer: Spinner
+    private lateinit var orientation: Spinner
+    private lateinit var rotation: Spinner
     private lateinit var keepOn: Switch
     private lateinit var autostart: Switch
     private val ui = Handler(Looper.getMainLooper())
@@ -100,6 +102,27 @@ class MainActivity : Activity() {
         fps = Ui.field(this, prefs.fps.toString(), number = true); q.addView(fps)
         q.addView(Ui.label(this, "Bitrate (kbit/s)"))
         bitrate = Ui.field(this, prefs.bitrateKbps.toString(), number = true); q.addView(bitrate)
+        q.addView(Ui.label(this, "Aufnahme-Ausrichtung"))
+        orientation = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
+                listOf("Querformat (fest)", "Hochformat (fest)", "Automatisch (folgt dem Handy)"),
+            )
+            setSelection(prefs.orientation)
+        }
+        q.addView(orientation)
+        q.addView(Ui.text(this,
+            "Bei fester Ausrichtung pausiert die Aufnahme, solange das Handy anders herum steht (z. B. wenn AleCorder offen ist).",
+            12f, Ui.MUTED))
+        q.addView(Ui.label(this, "Bild drehen (falls die Aufnahme verdreht ist)"))
+        rotation = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
+                listOf("0° (normal)", "90°", "180°", "270°"),
+            )
+            setSelection(prefs.rotation / 90)
+        }
+        q.addView(rotation)
         q.addView(Ui.label(this, "Maximale Ausgabegröße (längere Kante)"))
         maxOut = Spinner(this).apply {
             adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, outOptions.map { it.second })
@@ -152,6 +175,8 @@ class MainActivity : Activity() {
         localMb.text.toString().toIntOrNull()?.let { prefs.maxLocalMb = it }
         prefs.maxOut = outOptions.getOrNull(maxOut.selectedItemPosition)?.first ?: 1280
         prefs.transferMode = transfer.selectedItemPosition
+        prefs.orientation = orientation.selectedItemPosition
+        prefs.rotation = rotation.selectedItemPosition * 90
         prefs.keepScreenOn = keepOn.isChecked
         prefs.autostart = autostart.isChecked
     }

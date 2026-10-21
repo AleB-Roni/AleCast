@@ -39,13 +39,26 @@ class RecorderService : Service() {
         override fun onDisplayAdded(displayId: Int) {}
         override fun onDisplayRemoved(displayId: Int) {}
         override fun onDisplayChanged(displayId: Int) {
-            if (displayId != Display.DEFAULT_DISPLAY) return
-            val (w, h, d) = displaySize()
-            if (w != capW || h != capH) {
-                capW = w; capH = h; dpi = d
-                virtualDisplay?.resize(w, h, d)
-                engine?.resizeCapture(w, h)
-            }
+            if (displayId == Display.DEFAULT_DISPLAY) checkDisplay()
+        }
+    }
+
+    /** Zusätzliche Absicherung: nicht jedes Gerät meldet jede Drehung zuverlässig. */
+    private val displayPoll = object : Runnable {
+        override fun run() {
+            checkDisplay()
+            main.postDelayed(this, 1500)
+        }
+    }
+
+    /** Bei Drehung das VirtualDisplay an die neue Größe anpassen. */
+    private fun checkDisplay() {
+        if (virtualDisplay == null) return
+        val (w, h, d) = displaySize()
+        if (w != capW || h != capH) {
+            capW = w; capH = h; dpi = d
+            virtualDisplay?.resize(w, h, d)
+            engine?.resizeCapture(w, h)
         }
     }
 
@@ -126,6 +139,7 @@ class RecorderService : Service() {
         )
         eng.configure(Prefs(this).encoderSettings())
         getSystemService(DisplayManager::class.java).registerDisplayListener(displayListener, main)
+        main.postDelayed(displayPoll, 1500)
 
         if (Prefs(this).keepScreenOn) acquireScreenLock()
         RecorderState.running = true
@@ -151,6 +165,7 @@ class RecorderService : Service() {
 
     private fun shutdown() {
         try { getSystemService(DisplayManager::class.java).unregisterDisplayListener(displayListener) } catch (_: Exception) {}
+        main.removeCallbacks(displayPoll)
         val eng = engine
         engine = null
         // Encoder sauber beenden, damit das letzte Segment vollständig geschrieben wird
