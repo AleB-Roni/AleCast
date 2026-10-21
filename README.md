@@ -89,6 +89,15 @@ Port `8080` im Container auf einen freien Host-Port legen (Vorlage: `8086`), dan
 - Text ans Handy senden (nur ASCII, keine Umlaute – Einschränkung von `adb input text`)
 - Status: Akku, Temperatur, ob Tapo im Vordergrund ist, AleCast-Log
 
+### Aufnahmebereich (Ausschnitt & Skalierung)
+
+Karte **Aufnahmebereich**: **Bereich ziehen** aktivieren und ein Rechteck über das Bild ziehen, eine Vorlage wählen (Links/Rechts/Oben/Unten ½, Zentrum) oder X/Y/Breite/Höhe in Prozent eintippen. Dann **Übernehmen** – der Stream startet mit dem Ausschnitt neu.
+
+- **Quellauflösung**: wie scharf das Handy aufnimmt. Bei kleinen Ausschnitten **Voll** wählen, damit der Ausschnitt nicht pixelig wird.
+- **Ausgabebreite**: skaliert das Ergebnis auf eine feste Breite (Seitenverhältnis bleibt).
+- Gespeichert in `alecast-settings.json` im ADB-Schlüssel-Ordner, bleibt also nach Neustart erhalten.
+- Nach einer Änderung ändert sich die Auflösung des Streams → **Frigate einmal neu starten** und ggf. Bewegungsmasken neu zeichnen.
+
 Das Bild ist eine Screenshot-Vorschau (ca. 1×/Sekunde), kein Video – gedacht zum Einstellen, nicht zum Zuschauen. **Nicht ins Internet freigeben**; von unterwegs nur über VPN/WireGuard öffnen oder `WEBUI_PASSWORD` setzen.
 
 ## Einstellungen (Umgebungsvariablen)

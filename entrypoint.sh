@@ -119,13 +119,19 @@ center_tap_loop() {
   done
 }
 
+# Einstellungen aus der Web-UI (Aufnahmebereich, Auflösung) abfragen
+setting() { python3 /opt/alecast/webui.py "--get-$1" 2>/dev/null; }
+
 start_server() {
+  local max_size
+  max_size="$(setting max-size)"
+  [ -z "${max_size}" ] && max_size="${MAX_SIZE}"
   adb shell pkill -f com.genymobile.scrcpy >/dev/null 2>&1
   adb forward --remove-all >/dev/null 2>&1
   adb forward "tcp:${LOCAL_PORT}" localabstract:scrcpy >/dev/null || return 1
   adb shell CLASSPATH="${SERVER_JAR}" app_process / com.genymobile.scrcpy.Server "${SCRCPY_VERSION}" \
     tunnel_forward=true audio=false control=false cleanup=false raw_stream=true \
-    video_codec=h264 max_size="${MAX_SIZE}" max_fps="${MAX_FPS}" \
+    video_codec=h264 max_size="${max_size}" max_fps="${MAX_FPS}" \
     video_bit_rate="${VIDEO_BIT_RATE}" &
   SERVER_PID=$!
   sleep 2
@@ -135,9 +141,15 @@ run_ffmpeg() {
   local in_args=(-hide_banner -loglevel warning
                  -fflags +genpts+nobuffer -use_wallclock_as_timestamps 1
                  -f h264 -i "tcp://127.0.0.1:${LOCAL_PORT}")
-  local out_args
-  if [ "${TRANSCODE}" = "1" ]; then
-    out_args=(-vf "fps=${OUT_FPS}" -c:v libx264 -preset veryfast -tune zerolatency
+  local out_args extra_vf vf
+  extra_vf="$(setting vf)"
+  vf="fps=${OUT_FPS}"
+  if [ -n "${extra_vf}" ]; then
+    vf="${vf},${extra_vf}"
+    log "Aufnahmebereich/Skalierung aktiv: ${extra_vf}"
+  fi
+  if [ "${TRANSCODE}" = "1" ] || [ -n "${extra_vf}" ]; then
+    out_args=(-vf "${vf}" -c:v libx264 -preset veryfast -tune zerolatency
               -pix_fmt yuv420p -g "$(( OUT_FPS * 2 ))" -b:v "${VIDEO_BIT_RATE}")
   else
     out_args=(-c copy)

@@ -13,8 +13,83 @@ LOG_FILE = os.environ.get("ALECAST_LOG", "/tmp/alecast.log")
 PREVIEW_WIDTH = int(os.environ.get("WEBUI_PREVIEW_WIDTH", "960"))
 TAPO_PACKAGE = "com.tplink.iot"
 
+SETTINGS_FILE = os.environ.get("ALECAST_SETTINGS", "/root/.android/alecast-settings.json")
+OUT_WIDTHS = (0, 640, 960, 1280, 1920)
+SOURCE_SIZES = (0, 1280, 1600, 1920, 4096)  # 0 = Standard (MAX_SIZE), 4096 = volle Auflösung
+
 _screen_lock = threading.Lock()
 _last_size = {"w": 0, "h": 0}
+
+
+def default_settings():
+    return {"crop": {"enabled": False, "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0},
+            "out_width": 0, "source_size": 0}
+
+
+def load_settings():
+    s = default_settings()
+    try:
+        with open(SETTINGS_FILE) as f:
+            data = json.load(f)
+        crop = data.get("crop", {})
+        for k in ("x", "y", "w", "h"):
+            if k in crop:
+                s["crop"][k] = float(crop[k])
+        s["crop"]["enabled"] = bool(crop.get("enabled", False))
+        if int(data.get("out_width", 0)) in OUT_WIDTHS:
+            s["out_width"] = int(data["out_width"])
+        if int(data.get("source_size", 0)) in SOURCE_SIZES:
+            s["source_size"] = int(data["source_size"])
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return s
+
+
+def sanitize_crop(c):
+    x = min(max(float(c.get("x", 0)), 0.0), 0.99)
+    y = min(max(float(c.get("y", 0)), 0.0), 0.99)
+    w = min(max(float(c.get("w", 1)), 0.01), 1.0 - x)
+    h = min(max(float(c.get("h", 1)), 0.01), 1.0 - y)
+    full = x < 0.001 and y < 0.001 and w > 0.999 and h > 0.999
+    return {"enabled": bool(c.get("enabled", True)) and not full,
+            "x": round(x, 4), "y": round(y, 4), "w": round(w, 4), "h": round(h, 4)}
+
+
+def save_settings(body):
+    s = load_settings()
+    if "crop" in body:
+        s["crop"] = sanitize_crop(body["crop"])
+    if "out_width" in body:
+        ow = int(body["out_width"])
+        if ow not in OUT_WIDTHS:
+            raise ValueError("ungültige Ausgabebreite")
+        s["out_width"] = ow
+    if "source_size" in body:
+        ss = int(body["source_size"])
+        if ss not in SOURCE_SIZES:
+            raise ValueError("ungültige Quellauflösung")
+        s["source_size"] = ss
+    os.makedirs(os.path.dirname(SETTINGS_FILE) or ".", exist_ok=True)
+    tmp = SETTINGS_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(s, f, indent=2)
+    os.replace(tmp, SETTINGS_FILE)
+    return s
+
+
+def ffmpeg_filter(s):
+    """Zusätzliche ffmpeg-Filter für Ausschnitt und Skalierung (leer = keine)."""
+    parts = []
+    c = s["crop"]
+    if c["enabled"]:
+        parts.append("crop=trunc(iw*{w}/2)*2:trunc(ih*{h}/2)*2:trunc(iw*{x}):trunc(ih*{y})".format(**c))
+    if s["out_width"]:
+        parts.append(f"scale={s['out_width']}:-2:flags=lanczos")
+    return ",".join(parts)
+
+
+def restart_stream():
+    subprocess.run(["pkill", "-f", "ffmpeg .*-f rtsp"])
 
 KEYS = {
     "back": "KEYCODE_BACK",
@@ -147,7 +222,7 @@ def do_action(body):
         adb("shell", "settings", "put", "system", "accelerometer_rotation", "0")
         adb("shell", "settings", "put", "system", "user_rotation", mode)
     elif kind == "stream_restart":
-        subprocess.run(["pkill", "-f", "ffmpeg .*-f rtsp"])
+        restart_stream()
     else:
         return False, "unbekannte Aktion"
     return True, "ok"
@@ -203,20 +278,27 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, img, ctype, {"X-Device-W": str(w), "X-Device-H": str(h)})
         elif path == "/api/status":
             self._json(status())
+        elif path == "/api/settings":
+            self._json(load_settings())
         else:
             self._send(404, b"nicht gefunden", "text/plain")
 
     def do_POST(self):
         if not self._auth_ok():
             return
-        if self.path != "/api/action":
+        if self.path not in ("/api/action", "/api/settings"):
             self._send(404, b"nicht gefunden", "text/plain")
             return
         try:
             length = min(int(self.headers.get("Content-Length", "0")), 10000)
             body = json.loads(self.rfile.read(length) or b"{}")
+            if self.path == "/api/settings":
+                s = save_settings(body)
+                restart_stream()
+                self._json({"ok": True, "msg": "gespeichert", "settings": s})
+                return
             ok, msg = do_action(body)
-        except (ValueError, KeyError, TypeError) as e:
+        except (ValueError, KeyError, TypeError, OSError) as e:
             ok, msg = False, f"ungültige Anfrage: {e}"
         self._json({"ok": ok, "msg": msg}, 200 if ok else 400)
 
@@ -261,6 +343,17 @@ dl{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;margin:0;font-size:1
 dt{color:var(--muted)}dd{margin:0;text-align:right}
 pre{margin:0;max-height:220px;overflow:auto;font:11px/1.45 ui-monospace,Menlo,Consolas,monospace;color:#b9c0c6;white-space:pre-wrap;word-break:break-all}
 label.sw{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;margin-left:auto}
+.crop{position:absolute;border:2px solid var(--accent);box-shadow:0 0 0 9999px rgba(0,0,0,.5);pointer-events:none;display:none}
+.crop.draft{border-style:dashed}
+.crop span{position:absolute;left:0;top:-22px;background:var(--accent);color:#1a1006;font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px 4px 0 0;white-space:nowrap}
+.screen.cropmode img{cursor:cell}
+button.on{background:var(--accent);color:#1a1006;border-color:var(--accent)}
+.nums{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:8px 0}
+.nums label{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted)}
+.nums input{width:100%;background:#0d0f11;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit}
+.sel{display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center;font-size:12px;color:var(--muted);margin-bottom:8px}
+.sel select{width:100%;padding:6px}
+.note{font-size:11px;color:var(--muted);margin-top:8px}
 #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);padding:8px 14px;border-radius:8px;opacity:0;transition:opacity .2s;pointer-events:none}
 </style>
 </head>
@@ -279,8 +372,9 @@ label.sw{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12
     <div class="screen" id="screen">
       <span class="msg" id="msg">Lade Bildschirm …</span>
       <img id="img" alt="Handy-Bildschirm" draggable="false">
+      <div class="crop" id="crop"><span id="cropLabel"></span></div>
     </div>
-    <div class="hint">Klicken = tippen · Ziehen = wischen · Gedrückt halten = langes Tippen</div>
+    <div class="hint" id="hint">Klicken = tippen · Ziehen = wischen · Gedrückt halten = langes Tippen</div>
   </section>
   <aside>
     <div class="card">
@@ -304,6 +398,46 @@ label.sw{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12
         <button data-rot="1">Querformat</button>
         <button data-rot="0">Hochformat</button>
       </div>
+    </div>
+    <div class="card">
+      <h2>Aufnahmebereich</h2>
+      <div class="grid grid2">
+        <button id="cropMode">▭ Bereich ziehen</button>
+        <button id="cropFull">Ganzer Bildschirm</button>
+      </div>
+      <div class="grid" style="margin-top:6px">
+        <button data-preset="0,0,.5,1">Links ½</button>
+        <button data-preset=".25,0,.5,1">Mitte ½</button>
+        <button data-preset=".5,0,.5,1">Rechts ½</button>
+        <button data-preset="0,0,1,.5">Oben ½</button>
+        <button data-preset=".25,.25,.5,.5">Zentrum</button>
+        <button data-preset="0,.5,1,.5">Unten ½</button>
+      </div>
+      <div class="nums">
+        <label>X %<input type="number" id="cx" min="0" max="99" step="0.5"></label>
+        <label>Y %<input type="number" id="cy" min="0" max="99" step="0.5"></label>
+        <label>Breite %<input type="number" id="cw" min="1" max="100" step="0.5"></label>
+        <label>Höhe %<input type="number" id="ch" min="1" max="100" step="0.5"></label>
+      </div>
+      <div class="sel">
+        <span>Quellauflösung</span>
+        <select id="srcSize">
+          <option value="0">Standard</option><option value="1280">1280</option>
+          <option value="1600">1600</option><option value="1920">1920</option>
+          <option value="4096">Voll (Handy-Auflösung)</option>
+        </select>
+        <span>Ausgabebreite</span>
+        <select id="outW">
+          <option value="0">wie Ausschnitt</option><option value="640">640 px</option>
+          <option value="960">960 px</option><option value="1280">1280 px</option>
+          <option value="1920">1920 px</option>
+        </select>
+      </div>
+      <div class="grid grid2">
+        <button class="primary" id="cropApply">Übernehmen</button>
+        <button id="cropReset">Verwerfen</button>
+      </div>
+      <div class="note" id="cropInfo">Aktiv: ganzer Bildschirm</div>
     </div>
     <div class="card">
       <h2>Text eingeben</h2>
@@ -368,9 +502,67 @@ function toDevice(ev){
 }
 function ripple(p){const d=document.createElement("div");d.className="ripple";d.style.left=p.px+"px";d.style.top=p.py+"px";screen.appendChild(d);setTimeout(()=>d.remove(),600)}
 
+/* ---------- Aufnahmebereich ---------- */
+let saved={crop:{enabled:false,x:0,y:0,w:1,h:1},out_width:0,source_size:0};
+let draft=null, cropMode=false, cstart=null;
+const r4=v=>Math.round(v*10000)/10000;
+function frac(ev){const b=img.getBoundingClientRect();
+  return {x:Math.min(1,Math.max(0,(ev.clientX-b.left)/b.width)), y:Math.min(1,Math.max(0,(ev.clientY-b.top)/b.height))}}
+function isFull(c){return c.x<0.001&&c.y<0.001&&c.w>0.999&&c.h>0.999}
+function drawCrop(){
+  const el=$("crop"), c=draft||saved.crop;
+  if(!img.naturalWidth||(!draft&&(!c.enabled||isFull(c)))){el.style.display="none";return}
+  const b=img.getBoundingClientRect(), s=screen.getBoundingClientRect();
+  el.style.display="block"; el.classList.toggle("draft",!!draft);
+  el.style.left=(b.left-s.left+c.x*b.width)+"px"; el.style.top=(b.top-s.top+c.y*b.height)+"px";
+  el.style.width=(c.w*b.width)+"px"; el.style.height=(c.h*b.height)+"px";
+  const pw=dev.w?Math.round(c.w*dev.w):0, ph=dev.h?Math.round(c.h*dev.h):0;
+  $("cropLabel").textContent=(draft?"Entwurf ":"")+(pw?pw+"×"+ph+" px":"");
+}
+function fillInputs(c){$("cx").value=+(c.x*100).toFixed(1);$("cy").value=+(c.y*100).toFixed(1);$("cw").value=+(c.w*100).toFixed(1);$("ch").value=+(c.h*100).toFixed(1)}
+function setDraft(c){
+  c.x=Math.min(.99,Math.max(0,c.x)); c.y=Math.min(.99,Math.max(0,c.y));
+  c.w=Math.min(1-c.x,Math.max(.01,c.w)); c.h=Math.min(1-c.y,Math.max(.01,c.h));
+  draft={x:r4(c.x),y:r4(c.y),w:r4(c.w),h:r4(c.h)}; fillInputs(draft); drawCrop();
+}
+function infoText(){
+  const c=saved.crop, parts=[];
+  parts.push(c.enabled&&!isFull(c)?`Ausschnitt X ${+(c.x*100).toFixed(1)} %, Y ${+(c.y*100).toFixed(1)} %, ${+(c.w*100).toFixed(1)} × ${+(c.h*100).toFixed(1)} %`:"ganzer Bildschirm");
+  if(saved.out_width) parts.push("Ausgabe "+saved.out_width+" px breit");
+  if(saved.source_size) parts.push("Quelle "+(saved.source_size>=4096?"voll":saved.source_size));
+  $("cropInfo").textContent="Aktiv: "+parts.join(" · ");
+}
+async function loadSettings(){
+  try{saved=await (await fetch("api/settings")).json()}catch(e){}
+  draft=null; fillInputs(saved.crop); $("outW").value=saved.out_width; $("srcSize").value=saved.source_size; infoText(); drawCrop();
+}
+function setCropMode(on){cropMode=on;$("cropMode").classList.toggle("on",on);screen.classList.toggle("cropmode",on);
+  $("hint").textContent=on?"Rechteck über den gewünschten Bereich ziehen, dann „Übernehmen“":"Klicken = tippen · Ziehen = wischen · Gedrückt halten = langes Tippen"}
+$("cropMode").onclick=()=>setCropMode(!cropMode);
+$("cropFull").onclick=()=>setDraft({x:0,y:0,w:1,h:1});
+document.querySelectorAll("[data-preset]").forEach(b=>b.onclick=()=>{const [x,y,w,h]=b.dataset.preset.split(",").map(Number);setDraft({x,y,w,h})});
+["cx","cy","cw","ch"].forEach(id=>$(id).onchange=()=>setDraft({x:+$("cx").value/100,y:+$("cy").value/100,w:+$("cw").value/100,h:+$("ch").value/100}));
+$("cropReset").onclick=()=>{setCropMode(false);loadSettings()};
+$("cropApply").onclick=async()=>{
+  const c=draft||saved.crop;
+  const body={crop:{enabled:!isFull(c),x:c.x,y:c.y,w:c.w,h:c.h},out_width:+$("outW").value,source_size:+$("srcSize").value};
+  try{
+    const r=await fetch("api/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const j=await r.json(); toast(j.ok?"Übernommen – Stream startet neu":"Fehler: "+j.msg);
+  }catch(e){toast("Keine Verbindung")}
+  setCropMode(false); loadSettings();
+};
+window.addEventListener("resize",drawCrop);
+img.addEventListener("load",drawCrop);
+
 let start=null;
-img.addEventListener("pointerdown",e=>{if(!dev.w)return;e.preventDefault();img.setPointerCapture(e.pointerId);start={...toDevice(e),t:Date.now()}});
+img.addEventListener("pointerdown",e=>{if(!dev.w)return;e.preventDefault();img.setPointerCapture(e.pointerId);
+  if(cropMode){cstart=frac(e);setDraft({x:cstart.x,y:cstart.y,w:.01,h:.01});return}
+  start={...toDevice(e),t:Date.now()}});
+img.addEventListener("pointermove",e=>{if(!cropMode||!cstart)return;const p=frac(e);
+  setDraft({x:Math.min(cstart.x,p.x),y:Math.min(cstart.y,p.y),w:Math.abs(p.x-cstart.x),h:Math.abs(p.y-cstart.y)})});
 img.addEventListener("pointerup",e=>{
+  if(cropMode){cstart=null;return}
   if(!start)return; const end=toDevice(e), ms=Date.now()-start.t;
   const dist=Math.hypot(end.x-start.x,end.y-start.y);
   ripple(start);
@@ -399,12 +591,20 @@ async function poll(){
   }catch(e){}
   setTimeout(poll,5000);
 }
-refresh(); poll();
+refresh(); poll(); loadSettings();
 </script>
 </body>
 </html>
 """
 
 if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1:
+        cur = load_settings()
+        if sys.argv[1] == "--get-vf":
+            print(ffmpeg_filter(cur))
+        elif sys.argv[1] == "--get-max-size":
+            print(cur["source_size"] or "")
+        sys.exit(0)
     print(f"[AleCast] Web-UI auf Port {PORT}" + (" (mit Passwort)" if PASSWORD else ""), flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
