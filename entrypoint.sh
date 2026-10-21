@@ -89,19 +89,31 @@ alecorder_permissions() {
   adb shell settings put secure accessibility_enabled 1 >/dev/null 2>&1
 }
 
-# Startet AleCorder neu, wenn er aufnehmen soll, aber nicht läuft (z. B. nach Neustart oder Absturz)
+# USB-Tunnel: 127.0.0.1:18086 auf dem Handy -> Upload-Server in diesem Container (spart Netz-Traffic)
+USB_UPLOAD_PORT="${USB_UPLOAD_PORT:-18086}"
+usb_tunnel() {
+  [ "${WEBUI_ENABLED:-1}" = "1" ] || return 0
+  if ! adb reverse --list 2>/dev/null | grep -q "tcp:${USB_UPLOAD_PORT} "; then
+    if adb reverse "tcp:${USB_UPLOAD_PORT}" "tcp:${WEBUI_PORT:-8080}" >/dev/null 2>&1; then
+      log "USB-Upload aktiv: Handy erreicht AleCast über 127.0.0.1:${USB_UPLOAD_PORT}"
+    fi
+  fi
+}
+
+# Hält den USB-Tunnel aufrecht und startet AleCorder neu, wenn er aufnehmen soll, aber nicht läuft
 alecorder_watchdog() {
-  [ "${ALECORDER_WATCHDOG:-1}" = "1" ] || return
   local announced=0
   while true; do
-    sleep 60
+    sleep 30
     [ "$(adb get-state 2>/dev/null)" = "device" ] || continue
+    usb_tunnel
     alecorder_installed || continue
+    alecorder_permissions
+    [ "${ALECORDER_WATCHDOG:-1}" = "1" ] || continue
     if [ "${announced}" = "0" ]; then
       log "AleCorder gefunden – Aufnahme-Erlaubnis gesetzt, Watchdog aktiv"
       announced=1
     fi
-    alecorder_permissions
     want="$(adb shell cat "/sdcard/Android/data/${ALECORDER_PKG}/files/should_run" 2>/dev/null | tr -d '\r')"
     [ "${want}" = "1" ] || continue
     if ! adb shell dumpsys activity services "${ALECORDER_PKG}" 2>/dev/null | grep -q "RecorderService"; then
@@ -234,6 +246,7 @@ while true; do
     CENTER_PID=$!
   fi
 
+  usb_tunnel
   if alecorder_installed; then alecorder_permissions; fi
   if [ -z "${WATCHDOG_PID:-}" ] || ! kill -0 "${WATCHDOG_PID}" 2>/dev/null; then
     alecorder_watchdog &

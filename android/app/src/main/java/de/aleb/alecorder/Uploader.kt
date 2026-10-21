@@ -68,32 +68,67 @@ class Uploader private constructor(context: Context, private val dir: File) {
             return false
         }
         val prefs = Prefs(ctx)
+        var unreachable = ""
+        for ((name, base) in routes(prefs)) {
+            val (code, msg) = send(f, base, prefs, start, dur, if (name == USB) 2_000 else 10_000)
+            when {
+                code in 200..299 -> {
+                    RecorderState.lastUploadVia = name
+                    RecorderState.usbAvailable = name == USB
+                    return true
+                }
+                code < 0 -> {
+                    if (name == USB) RecorderState.usbAvailable = false
+                    unreachable = "$name: $msg"
+                }
+                else -> {
+                    // Server erreicht, aber abgelehnt – über den anderen Weg käme dieselbe Antwort
+                    RecorderState.lastError = when (code) {
+                        401 -> "Server: falsches Passwort"
+                        404 -> "Server: Upload-Adresse nicht gefunden – AleCast aktualisieren?"
+                        else -> "Server antwortet $code $msg".trim()
+                    }
+                    return false
+                }
+            }
+        }
+        RecorderState.lastError = if (prefs.transferMode == Prefs.TRANSFER_USB) {
+            "USB: AleCast nicht erreichbar – Kabel und USB-Debugging prüfen (Segmente warten im Puffer)"
+        } else {
+            "Upload nicht möglich – $unreachable"
+        }
+        return false
+    }
+
+    /** Liefert (Antwortcode, Meldung); Code -1 = nicht erreichbar. */
+    private fun send(f: File, base: String, prefs: Prefs, start: Long, dur: Long, connectTimeout: Int): Pair<Int, String> {
         val cam = URLEncoder.encode(prefs.camera, "UTF-8")
-        val url = URL("${prefs.server}/api/upload?camera=$cam&start=$start&duration=$dur")
-        val conn = url.openConnection() as HttpURLConnection
+        val conn = try {
+            URL("$base/api/upload?camera=$cam&start=$start&duration=$dur").openConnection() as HttpURLConnection
+        } catch (e: Exception) {
+            return -1 to (e.message ?: "ungültige Adresse")
+        }
         try {
             conn.requestMethod = "POST"
             conn.doOutput = true
-            conn.connectTimeout = 10_000
+            conn.connectTimeout = connectTimeout
             conn.readTimeout = 120_000
             conn.setFixedLengthStreamingMode(f.length())
             conn.setRequestProperty("Content-Type", "video/mp4")
-            if (prefs.password.isNotEmpty()) {
-                val token = Base64.encodeToString("alecorder:${prefs.password}".toByteArray(), Base64.NO_WRAP)
-                conn.setRequestProperty("Authorization", "Basic $token")
+            authorize(conn, prefs)
+            try {
+                f.inputStream().use { input -> conn.outputStream.use { input.copyTo(it, 256 * 1024) } }
+            } catch (e: java.io.IOException) {
+                return -1 to (e.message ?: e.javaClass.simpleName)
             }
-            f.inputStream().use { input -> conn.outputStream.use { input.copyTo(it, 256 * 1024) } }
             val code = conn.responseCode
-            if (code in 200..299) return true
+            if (code in 200..299) return code to "ok"
             val body = try {
                 conn.errorStream?.bufferedReader()?.readText()?.take(200) ?: ""
             } catch (_: Exception) { "" }
-            RecorderState.lastError = when (code) {
-                401 -> "Server: falsches Passwort"
-                404 -> "Server: Upload-Adresse nicht gefunden – AleCast aktualisieren?"
-                else -> "Server antwortet $code $body".trim()
-            }
-            return false
+            return code to body
+        } catch (e: java.io.IOException) {
+            return -1 to (e.message ?: e.javaClass.simpleName)
         } finally {
             conn.disconnect()
         }
@@ -124,27 +159,47 @@ class Uploader private constructor(context: Context, private val dir: File) {
             return up
         }
 
-        /** Verbindung zum Server prüfen (blockierend). */
+        const val USB = "USB"
+        const val NET = "Netzwerk"
+
+        /** Port, den AleCast per "adb reverse" vom Handy zum Container durchreicht. */
+        const val USB_PORT = 18086
+
+        fun routes(prefs: Prefs): List<Pair<String, String>> = when (prefs.transferMode) {
+            Prefs.TRANSFER_USB -> listOf(USB to "http://127.0.0.1:$USB_PORT")
+            Prefs.TRANSFER_NET -> listOf(NET to prefs.server)
+            else -> listOf(USB to "http://127.0.0.1:$USB_PORT", NET to prefs.server)
+        }
+
+        private fun authorize(conn: HttpURLConnection, prefs: Prefs) {
+            if (prefs.password.isNotEmpty()) {
+                val token = Base64.encodeToString("alecorder:${prefs.password}".toByteArray(), Base64.NO_WRAP)
+                conn.setRequestProperty("Authorization", "Basic $token")
+            }
+        }
+
+        /** Verbindung über alle eingestellten Wege prüfen (blockierend). */
         fun testConnection(ctx: Context): String {
             val prefs = Prefs(ctx)
-            return try {
-                val conn = URL("${prefs.server}/api/recordings").openConnection() as HttpURLConnection
-                conn.connectTimeout = 5_000
-                conn.readTimeout = 5_000
-                if (prefs.password.isNotEmpty()) {
-                    val token = Base64.encodeToString("alecorder:${prefs.password}".toByteArray(), Base64.NO_WRAP)
-                    conn.setRequestProperty("Authorization", "Basic $token")
+            return routes(prefs).joinToString("\n") { (name, base) ->
+                val r = try {
+                    val conn = URL("$base/api/recordings").openConnection() as HttpURLConnection
+                    conn.connectTimeout = if (name == USB) 2_000 else 5_000
+                    conn.readTimeout = 5_000
+                    authorize(conn, prefs)
+                    val code = conn.responseCode
+                    conn.disconnect()
+                    when (code) {
+                        200 -> "✓ verbunden"
+                        401 -> "✗ Passwort falsch"
+                        404 -> "✗ erreichbar, aber AleCast zu alt (Update nötig)"
+                        else -> "✗ Antwort $code"
+                    }
+                } catch (e: Exception) {
+                    if (name == USB) "✗ nicht verbunden (Kabel an AleCast? USB-Debugging an?)" else "✗ nicht erreichbar: ${e.message}"
                 }
-                val code = conn.responseCode
-                conn.disconnect()
-                when (code) {
-                    200 -> "✓ Verbunden mit AleCast"
-                    401 -> "✗ Passwort falsch"
-                    404 -> "✗ Server erreichbar, aber kein AleCast mit Aufnahme-Funktion (Update nötig?)"
-                    else -> "✗ Server antwortet $code"
-                }
-            } catch (e: Exception) {
-                "✗ Nicht erreichbar: ${e.message}"
+                if (name == USB) RecorderState.usbAvailable = r.startsWith("✓")
+                "$name: $r"
             }
         }
     }

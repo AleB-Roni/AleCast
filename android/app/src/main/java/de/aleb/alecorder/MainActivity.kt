@@ -33,6 +33,7 @@ class MainActivity : Activity() {
     private lateinit var bitrate: android.widget.EditText
     private lateinit var localMb: android.widget.EditText
     private lateinit var maxOut: Spinner
+    private lateinit var transfer: Spinner
     private lateinit var keepOn: Switch
     private lateinit var autostart: Switch
     private val ui = Handler(Looper.getMainLooper())
@@ -75,6 +76,19 @@ class MainActivity : Activity() {
         password = Ui.field(this, prefs.password, password = true); srv.addView(password)
         srv.addView(Ui.label(this, "Kameraname (A–Z, 0–9, _ und -)"))
         camera = Ui.field(this, prefs.camera); srv.addView(camera)
+        srv.addView(Ui.label(this, "Übertragung"))
+        transfer = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
+                listOf("Automatisch (USB-Kabel bevorzugt)", "Nur USB-Kabel (kein Netz-Traffic)", "Nur Netzwerk"),
+            )
+            setSelection(prefs.transferMode)
+        }
+        srv.addView(transfer)
+        srv.addView(Ui.text(this,
+            "USB: Handy per Kabel an den Unraid-Server mit AleCast stecken (USB-Debugging an). " +
+                "Die Segmente laufen dann durchs Kabel statt übers Netz. Bei „Nur USB“ warten sie im Puffer, bis das Kabel steckt.",
+            12f, Ui.MUTED))
         srv.addView(Ui.buttonRow(this, Ui.button(this, "Verbindung testen") { save(); testConnection() }))
         root.addView(srv)
 
@@ -137,6 +151,7 @@ class MainActivity : Activity() {
         bitrate.text.toString().toIntOrNull()?.let { prefs.bitrateKbps = it }
         localMb.text.toString().toIntOrNull()?.let { prefs.maxLocalMb = it }
         prefs.maxOut = outOptions.getOrNull(maxOut.selectedItemPosition)?.first ?: 1280
+        prefs.transferMode = transfer.selectedItemPosition
         prefs.keepScreenOn = keepOn.isChecked
         prefs.autostart = autostart.isChecked
     }
@@ -153,7 +168,10 @@ class MainActivity : Activity() {
         Toast.makeText(this, "Teste …", Toast.LENGTH_SHORT).show()
         thread {
             val r = Uploader.testConnection(this)
-            ui.post { Toast.makeText(this, r, Toast.LENGTH_LONG).show() }
+            ui.post {
+                android.app.AlertDialog.Builder(this).setTitle("Verbindungstest").setMessage(r)
+                    .setPositiveButton("OK", null).show()
+            }
         }
     }
 
@@ -186,7 +204,8 @@ class MainActivity : Activity() {
         if (s.running) sb.append("Bildschirm ${s.captureSize} → Video ${s.outputSize}\n")
         sb.append("Segmente: ${s.segmentsDone} aufgenommen, ${s.uploadedCount} hochgeladen\n")
         sb.append("Warteschlange: ${s.queueCount} (${s.queueBytes / 1_000_000} MB)")
-        if (s.lastUploadAt > 0) sb.append(" · letzter Upload ${t.format(Date(s.lastUploadAt))}")
+        if (s.lastUploadAt > 0) sb.append(" · letzter Upload ${t.format(Date(s.lastUploadAt))} per ${s.lastUploadVia}")
+        sb.append("\nUSB zu AleCast: ").append(if (s.usbAvailable) "verbunden" else "nicht verbunden")
         val crop = prefs.crop
         sb.append("\nAusschnitt: ").append(
             if (crop.isFull) "ganzer Bildschirm"

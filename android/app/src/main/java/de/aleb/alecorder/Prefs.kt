@@ -97,6 +97,11 @@ class Prefs(ctx: Context) {
                 .putFloat("crop_w", s.w).putFloat("crop_h", s.h).apply()
         }
 
+    /** Übertragungsweg: 0 = Automatisch (USB bevorzugt), 1 = nur USB, 2 = nur Netzwerk. */
+    var transferMode: Int
+        get() = p.getInt("transfer_mode", TRANSFER_AUTO)
+        set(v) = p.edit().putInt("transfer_mode", v.coerceIn(0, 2)).apply()
+
     /** Tipp-Automatik global an/aus. */
     var tapEnabled: Boolean
         get() = p.getBoolean("tap_enabled", true)
@@ -113,4 +118,10 @@ class Prefs(ctx: Context) {
         maxOut = maxOut,
         segmentMs = segmentSec * 1000L,
     )
+
+    companion object {
+        const val TRANSFER_AUTO = 0
+        const val TRANSFER_USB = 1
+        const val TRANSFER_NET = 2
+    }
 }

@@ -14,6 +14,8 @@ object RecorderState {
     @Volatile var lastUploadAt = 0L
     @Volatile var uploadedCount = 0
     @Volatile var lastError: String? = null
+    @Volatile var lastUploadVia = ""
+    @Volatile var usbAvailable = false
 
     /** Letztes Bild des Bildschirms, aufgenommen während AleCorder NICHT im Vordergrund war. */
     @Volatile var lastSnapshot: Bitmap? = null

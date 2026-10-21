@@ -159,6 +159,16 @@ Android-App im Ordner `android/`. Jede Änderung baut automatisch eine neue APK 
 - AleCast speichert wie Frigate: `/recordings/JJJJ-MM-TT/HH/<kamera>/MM.SS.mp4` und löscht nach `RETAIN_DAYS` Tagen.
 - Ansehen: **▶ Aufnahmen** in der AleCast-Web-UI (`/recordings`) – Kamera, Tag, Zeitleiste, Segmente laufen nahtlos hintereinander.
 
+### Übertragung per USB-Kabel (spart Netz-Traffic)
+
+Hängt das Handy per USB an dem Server mit AleCast, richtet AleCast automatisch einen Tunnel ein (`adb reverse`): Auf dem Handy erreicht `127.0.0.1:18086` direkt den Upload-Server im Container. In AleCorder unter **Übertragung**:
+
+- **Automatisch** – USB, wenn das Kabel steckt, sonst Netzwerk,
+- **Nur USB-Kabel** – nie übers Netz; ohne Kabel warten die Segmente im lokalen Puffer und werden nachgeholt, sobald das Kabel steckt,
+- **Nur Netzwerk** – wie bisher.
+
+**Verbindung testen** zeigt beide Wege getrennt an; im Status steht, über welchen Weg zuletzt hochgeladen wurde.
+
 ### Tipp-Punkte (Streams automatisch aktualisieren)
 
 **⊙ Tipp-Punkte** in AleCorder: auf das letzte Bildschirmfoto tippen, um Punkte zu setzen (ziehen = verschieben). Pro Punkt:
