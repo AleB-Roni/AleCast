@@ -4,7 +4,7 @@ FROM debian:bookworm-slim
 ARG SCRCPY_VERSION=4.0
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends adb ffmpeg ca-certificates curl procps \
+ && apt-get install -y --no-install-recommends adb ffmpeg ca-certificates curl procps python3 \
  && rm -rf /var/lib/apt/lists/*
 
 # Offizieller scrcpy-Server (läuft auf dem Handy, liefert rohen H.264-Stream)
@@ -22,9 +22,15 @@ ENV SCRCPY_VERSION=${SCRCPY_VERSION} \
     TAP_TEXT="Weiter ansehen|Weiterschauen|Weiter schauen|Continue watching|Continue|Aktualisieren|Erneut versuchen|Neu laden|Refresh|Retry" \
     TAP_INTERVAL=15 \
     CENTER_TAP_INTERVAL=600 \
-    KEEP_AWAKE=1
+    KEEP_AWAKE=1 \
+    WEBUI_ENABLED=1 \
+    WEBUI_PORT=8080 \
+    WEBUI_PASSWORD=""
+
+EXPOSE 8080
 
 COPY entrypoint.sh /entrypoint.sh
+COPY webui.py /opt/alecast/webui.py
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

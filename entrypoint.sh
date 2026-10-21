@@ -3,7 +3,18 @@
 # über den scrcpy-Server als RTSP (Push an go2rtc/Frigate oder einen RTSP-Server).
 set -u
 
-log() { echo "[AleCast $(date '+%F %T')] $*"; }
+ALECAST_LOG="${ALECAST_LOG:-/tmp/alecast.log}"
+export ALECAST_LOG
+: > "${ALECAST_LOG}"
+log() {
+  local line="[AleCast $(date '+%F %T')] $*"
+  echo "${line}"
+  echo "${line}" >> "${ALECAST_LOG}"
+  # Logdatei klein halten
+  if [ "$(wc -l < "${ALECAST_LOG}")" -gt 2000 ]; then
+    tail -n 500 "${ALECAST_LOG}" > "${ALECAST_LOG}.tmp" && mv "${ALECAST_LOG}.tmp" "${ALECAST_LOG}"
+  fi
+}
 
 if [ -z "${RTSP_URL}" ]; then
   log "FEHLER: RTSP_URL ist nicht gesetzt (z. B. rtsp://192.168.1.10:8554/tapo_app)"
@@ -24,6 +35,7 @@ cleanup() {
   log "Beende ..."
   [ -n "${TAP_PID}" ] && kill "${TAP_PID}" 2>/dev/null
   [ -n "${CENTER_PID}" ] && kill "${CENTER_PID}" 2>/dev/null
+  [ -n "${WEBUI_PID:-}" ] && kill "${WEBUI_PID}" 2>/dev/null
   [ -n "${SERVER_PID}" ] && kill "${SERVER_PID}" 2>/dev/null
   adb shell pkill -f com.genymobile.scrcpy >/dev/null 2>&1
   adb forward --remove-all >/dev/null 2>&1
@@ -134,6 +146,13 @@ run_ffmpeg() {
 }
 
 log "Start – Ziel: ${RTSP_URL}"
+
+WEBUI_PID=""
+if [ "${WEBUI_ENABLED:-1}" = "1" ]; then
+  python3 /opt/alecast/webui.py &
+  WEBUI_PID=$!
+  log "Web-UI erreichbar auf Port ${WEBUI_PORT:-8080}"
+fi
 while true; do
   wait_for_device
   if ! prepare_device; then

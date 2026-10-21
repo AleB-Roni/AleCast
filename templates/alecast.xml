@@ -9,13 +9,15 @@
   <Project>https://github.com/AleB-Roni/AleCast</Project>
   <Overview>Streamt den Bildschirm eines per USB angeschlossenen Android-Handys (scrcpy) als RTSP-Push an go2rtc/Frigate. Tippt den Weiterschauen-Dialog der Tapo-App automatisch weg.</Overview>
   <Category>HomeAutomation: MediaServer:Video</Category>
-  <WebUI/>
+  <WebUI>http://[IP]:[PORT:8080]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/AleB-Roni/AleCast/main/templates/alecast.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/Genymobile/scrcpy/master/app/data/icon.png</Icon>
   <ExtraParams>--restart unless-stopped</ExtraParams>
   <Config Name="USB-Geräte" Target="/dev/bus/usb" Default="/dev/bus/usb" Mode="rw" Description="USB-Bus des Hosts (für adb)" Type="Path" Display="advanced" Required="true" Mask="false">/dev/bus/usb</Config>
   <Config Name="ADB-Schlüssel" Target="/root/.android" Default="/mnt/user/appdata/alecast/adbkeys" Mode="rw" Description="Speichert die USB-Debugging-Freigabe, damit das Handy nicht jedes Mal fragt" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/alecast/adbkeys</Config>
   <Config Name="RTSP-Ziel" Target="RTSP_URL" Default="rtsp://192.168.1.10:8554/tapo_app" Mode="" Description="RTSP-Push-Ziel, z. B. go2rtc in Frigate: rtsp://FRIGATE-IP:8554/tapo_app" Type="Variable" Display="always" Required="true" Mask="false">rtsp://192.168.1.10:8554/tapo_app</Config>
+  <Config Name="Web-UI Port" Target="8080" Default="8086" Mode="tcp" Description="Port der AleCast-Web-UI (Handy fernsteuern)" Type="Port" Display="always" Required="false" Mask="false">8086</Config>
+  <Config Name="Web-UI Passwort" Target="WEBUI_PASSWORD" Default="" Mode="" Description="Optional: Passwort für die Web-UI (Benutzername beliebig). Leer = kein Passwort" Type="Variable" Display="always" Required="false" Mask="true"></Config>
   <Config Name="Auto-Tap Text" Target="TAP_TEXT" Default="Weiter ansehen|Weiterschauen|Weiter schauen|Continue watching|Continue|Aktualisieren|Erneut versuchen|Neu laden|Refresh|Retry" Mode="" Description="Button-Text des Weiterschauen-Dialogs (Regex, mehrere mit |). Leer = Auto-Tap aus" Type="Variable" Display="always" Required="false" Mask="false">Weiter ansehen|Weiterschauen|Weiter schauen|Continue watching|Continue|Aktualisieren|Erneut versuchen|Neu laden|Refresh|Retry</Config>
   <Config Name="Mitte-Tippen Intervall" Target="CENTER_TAP_INTERVAL" Default="600" Mode="" Description="Tippt alle X Sekunden in die Bildschirmmitte (z. B. Aktualisieren bei hängendem Feed). 0 = aus" Type="Variable" Display="always" Required="false" Mask="false">600</Config>
   <Config Name="Max. Auflösung" Target="MAX_SIZE" Default="1280" Mode="" Description="Längere Bildseite in Pixeln" Type="Variable" Display="advanced" Required="false" Mask="false">1280</Config>

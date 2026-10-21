@@ -10,6 +10,7 @@ Handy (Tapo-App) --USB--> scrcpy-Server (H.264) --> ffmpeg --> RTSP-Push --> go2
 - Startet bei Abbruch oder Ab-/Anstecken automatisch neu.
 - Tippt den „Weiterschauen“-Dialog der Tapo-App automatisch weg (Auto-Tap).
 - Tippt alle 10 Minuten in die Bildschirmmitte, falls der Feed hängt und „Aktualisieren“ braucht.
+- **Web-UI** zum Fernsteuern des Handys: Bildschirm sehen, tippen, wischen, Tasten, Text, Tapo/Stream neu starten.
 - Hält das Display wach, solange das Handy per USB verbunden ist.
 
 ## 1. Handy vorbereiten
@@ -79,6 +80,17 @@ Log ansehen:
 docker logs -f alecast
 ```
 
+## Web-UI
+
+Port `8080` im Container auf einen freien Host-Port legen (Vorlage: `8086`), dann im Browser `http://<Unraid-IP>:8086` öffnen.
+
+- **Klicken** = tippen, **ziehen** = wischen, **gedrückt halten** = langes Tippen
+- Knöpfe für Zurück/Home/Apps, Entsperren, Mitte tippen, Tapo öffnen/neu starten, Stream neu starten, Quer-/Hochformat
+- Text ans Handy senden (nur ASCII, keine Umlaute – Einschränkung von `adb input text`)
+- Status: Akku, Temperatur, ob Tapo im Vordergrund ist, AleCast-Log
+
+Das Bild ist eine Screenshot-Vorschau (ca. 1×/Sekunde), kein Video – gedacht zum Einstellen, nicht zum Zuschauen. **Nicht ins Internet freigeben**; von unterwegs nur über VPN/WireGuard öffnen oder `WEBUI_PASSWORD` setzen.
+
 ## Einstellungen (Umgebungsvariablen)
 
 | Variable | Standard | Bedeutung |
@@ -94,6 +106,9 @@ docker logs -f alecast
 | `TAP_INTERVAL` | `15` | Sekunden zwischen Dialog-Prüfungen |
 | `CENTER_TAP_INTERVAL` | `600` | Tippt alle X Sekunden in die Bildschirmmitte (z. B. „Aktualisieren“ bei hängendem Feed), `0` = aus |
 | `CENTER_X` / `CENTER_Y` | leer | Feste Tipp-Position statt automatisch ermittelter Mitte |
+| `WEBUI_PORT` | `8080` | Port der Web-UI im Container |
+| `WEBUI_PASSWORD` | leer | Optionales Passwort für die Web-UI (Benutzername beliebig) |
+| `WEBUI_ENABLED` | `1` | `0` = Web-UI aus |
 | `KEEP_AWAKE` | `1` | Display bei USB-Verbindung wach halten |
 
 ### Button-Text für Auto-Tap herausfinden
