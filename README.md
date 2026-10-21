@@ -55,6 +55,15 @@ Eine Seite für PC und Handy mit drei Bereichen (am PC links, am Handy unten):
 - **Handy** – Bildschirm des Handys fernsteuern (tippen, wischen, gedrückt halten). Tasten, Tapo-Aktionen, Text und der RTSP-Ausschnitt liegen im eingeklappten Bereich **Bedienung**.
 - **Einstellungen** – RTSP-Streaming, Aufbewahrung, Status und Protokoll.
 
+### Als App auf dem Handy
+
+AleCast ist eine Web-App (Manifest, Service Worker, App-Symbol) – wie das Tankbuch:
+
+- **Android/Chrome:** Einstellungen → **App installieren**, oder Chrome-Menü ⋮ → *App installieren*.
+- **iPhone/Safari:** Teilen → *Zum Home-Bildschirm*.
+
+Die echte Installation (eigenes Fenster ohne Browserleiste) verlangt **HTTPS**, z. B. über Nginx Proxy Manager oder Tailscale. Über `http://IP:8086` legt Chrome nur eine Verknüpfung an. Beim Reverse-Proxy für das Live-Bild **Puffern abschalten** (Nginx Proxy Manager → Proxy Host → *Advanced*: `proxy_buffering off;`), sonst hängt das MJPEG-Live-Bild.
+
 ## 3. Auf Unraid installieren
 
 Das Image wird bei jedem Push automatisch per GitHub Actions gebaut und liegt unter `ghcr.io/aleb-roni/alecast:latest`.

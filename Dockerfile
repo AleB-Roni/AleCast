@@ -33,6 +33,7 @@ EXPOSE 8080
 
 COPY entrypoint.sh /entrypoint.sh
 COPY webui.py recorder.py live.py app.html /opt/alecast/
+COPY static /opt/alecast/static
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

@@ -307,9 +307,17 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(obj).encode(), "application/json")
 
     def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        if path.startswith(PUBLIC_PATHS):
+            body, ctype = static_file(path)
+            if body is None:
+                self._send(404, b"nicht gefunden", "text/plain")
+            else:
+                extra = {"Service-Worker-Allowed": "/"} if path == "/sw.js" else None
+                self._send(200, body, ctype, extra)
+            return
         if not self._auth_ok():
             return
-        path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html", "/recordings", "/history"):
             self._send(200, app_page().encode(), "text/html; charset=utf-8")
         elif path == "/screen":
@@ -449,6 +457,21 @@ class Handler(BaseHTTPRequestHandler):
 
 
 _APP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.html")
+_STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+_STATIC_TYPES = {".webmanifest": "application/manifest+json", ".js": "text/javascript; charset=utf-8",
+                 ".png": "image/png", ".svg": "image/svg+xml"}
+# Für die App-Installation: Browser laden Manifest und Symbole ohne Anmeldedaten
+PUBLIC_PATHS = ("/manifest.webmanifest", "/sw.js", "/icons/")
+
+
+def static_file(path):
+    rel = path.lstrip("/")
+    full = os.path.realpath(os.path.join(_STATIC_DIR, rel))
+    if not full.startswith(os.path.realpath(_STATIC_DIR) + os.sep) or not os.path.isfile(full):
+        return None, None
+    ext = os.path.splitext(full)[1]
+    with open(full, "rb") as f:
+        return f.read(), _STATIC_TYPES.get(ext, "application/octet-stream")
 
 
 def app_page():

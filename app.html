@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0e141b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="AleCast">
+<link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <title>AleCast</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -26,6 +33,7 @@ button{cursor:pointer}
 :focus-visible{outline:2px solid var(--tape);outline-offset:2px}
 a{color:var(--tape)}
 svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+[hidden]{display:none!important}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 
 /* ---------- Shell ---------- */
@@ -54,7 +62,6 @@ main{min-width:0;min-height:0;position:relative}
 .osd .date{font-size:14px;color:#c9d3dc}
 .pill{display:inline-flex;align-items:center;gap:6px;font:600 12px/1 var(--sans);padding:5px 9px 5px 8px;border-radius:99px;letter-spacing:.04em}
 .pill i{width:7px;height:7px;border-radius:50%;background:currentColor}
-.pill[hidden]{display:none}
 .pill.live{background:var(--rec);color:#fff}
 .pill.live i{animation:blink 1.6s infinite}
 .pill.rec{background:rgba(54,198,181,.18);color:var(--tape)}
@@ -374,7 +381,14 @@ pre.log{margin:10px 0 0;max-height:260px;overflow:auto;background:var(--night);b
         <button class="primary" id="stSave">Einstellungen speichern</button>
         <p class="state" id="stInfo"></p>
 
-        <div class="sect" style="margin-top:22px">
+        <div class="sect" style="margin-top:22px" id="installSect">
+          <h2>Als App installieren</h2>
+          <p class="sub" id="installText">AleCast lässt sich wie eine App auf den Startbildschirm legen und öffnet sich dann ohne Browserleiste.</p>
+          <button class="primary" id="installBtn" hidden><svg data-ic="download"></svg>App installieren</button>
+          <div id="installHelp" class="state" style="margin-top:4px"></div>
+        </div>
+
+        <div class="sect">
           <h2>Status</h2>
           <dl class="kv" style="margin-top:10px">
             <dt>Handy</dt><dd id="sModel">–</dd>
@@ -415,6 +429,7 @@ const ICONS={
   refresh:'<path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/>',
   landscape:'<rect x="2.5" y="7" width="19" height="10" rx="2"/>', portrait:'<rect x="7" y="2.5" width="10" height="19" rx="2"/>',
   crop:'<path d="M6 2v14a2 2 0 0 0 2 2h14M2 6h14a2 2 0 0 1 2 2v14"/>',
+  download:'<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
   sliders:'<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
 };
 document.querySelectorAll("svg[data-ic]").forEach(s=>{s.setAttribute("viewBox","0 0 24 24");s.setAttribute("aria-hidden","true");s.innerHTML=ICONS[s.dataset.ic]||""});
@@ -742,6 +757,30 @@ async function poll(){
   }catch(e){$("conn").className="conn bad"}
   setTimeout(poll,5000);
 }
+
+/* ================= Als App installieren ================= */
+let installEvt=null;
+const standalone=()=>matchMedia("(display-mode: standalone)").matches||navigator.standalone===true;
+if("serviceWorker" in navigator&&window.isSecureContext)navigator.serviceWorker.register("sw.js").catch(()=>{});
+addEventListener("beforeinstallprompt",e=>{e.preventDefault();installEvt=e;updateInstall()});
+addEventListener("appinstalled",()=>{installEvt=null;toast("AleCast wurde installiert");updateInstall()});
+function updateInstall(){
+  const btn=$("installBtn"), help=$("installHelp"), txt=$("installText");
+  btn.hidden=!installEvt;
+  if(standalone()){txt.textContent="AleCast läuft bereits als installierte App.";help.textContent="";return}
+  const ios=/iPhone|iPad|iPod/.test(navigator.userAgent);
+  if(installEvt){help.textContent="";return}
+  if(!window.isSecureContext){
+    help.innerHTML="Für die echte Installation braucht der Browser <b>HTTPS</b> – so wie beim Tankbuch über deinen Reverse-Proxy (z. B. Nginx Proxy Manager oder Tailscale). "+
+      "Über <b>http://</b> geht nur eine Verknüpfung: Chrome-Menü ⋮ → <b>Zum Startbildschirm hinzufügen</b>.";
+  }else if(ios){
+    help.innerHTML="Auf dem iPhone: in Safari auf <b>Teilen</b> → <b>Zum Home-Bildschirm</b>.";
+  }else{
+    help.innerHTML="Falls kein Knopf erscheint: Chrome-Menü ⋮ → <b>App installieren</b> bzw. <b>Zum Startbildschirm hinzufügen</b>.";
+  }
+}
+$("installBtn").onclick=async()=>{ if(!installEvt)return; installEvt.prompt(); const r=await installEvt.userChoice; if(r.outcome==="accepted")toast("Wird installiert …"); installEvt=null; updateInstall() };
+updateInstall();
 
 /* ================= Start ================= */
 const first=parseHash();
